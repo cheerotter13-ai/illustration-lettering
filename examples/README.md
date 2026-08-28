@@ -1,11 +1,12 @@
 # 效果图说明
 
-全部为 SFW 对照，方便 README 预览。文件名 `*-before.jpg` 是中文原图，`*-after.jpg` 是本仓库 v0.6 输出。
+`*-before` / `*-lettered` 是中文原图；`*-after` / `*-mode-b` 是 v0.6 输出。
 
-| 目录 | 模式 | 说明 |
-|---|---|---|
-| `mode-a-bubble/` | Mode A | 只有带字原图，擦字后把英文铺进对话框 |
-| `mode-a-comic/` | Mode A | 分镜页 |
-| `mode-b-cleanplate/` | Mode B | 有无字底图，不跑 LaMa |
+| 目录 | 说明 |
+|---|---|
+| `mode-a-bubble/` | Mode A 对话框铺满（99 / 94 / 96） |
+| `mode-a-comic/` | Mode A 分镜 |
+| `mode-b-vs-a/` | **同一张图三栏**：原图、Mode A 残字、Mode B 干净（19、11_0001、14.1-8） |
+| `mode-b-cleanplate/` | Mode B 干净叠字/分镜（1、66、70） |
 
-不要把 NSFW 金标准图放进这个目录。
+不要用「底图把对话框整块抹掉」的 99 当 Mode B 样例。

@@ -25,7 +25,7 @@
 
 ## 效果参考
 
-仓库里只放了 **SFW** 对照，方便打开即看。完整 NSFW 金标准不进仓库。
+对照图选自验收过的干净样本：无残字、无糊脸。完整金标准不进仓库。
 
 ### Mode A · 对话框铺满
 
@@ -43,13 +43,25 @@
 |---|---|
 | ![](examples/mode-a-comic/0-1-before.jpg) | ![](examples/mode-a-comic/0-1-after.jpg) |
 
-### Mode B · 有无字底图（推荐）
+### Mode B 能过、Mode A 过不了
 
-底图已经没有对话框时，英文打在原来的位置附近，不会硬撑一块不存在的白泡。
+同一张图：Mode A 只有带字原图，LaMa 擦不干净会中英叠字。Mode B 用无字底图，不跑擦字，残字问题直接消失。
+
+| 原图 | Mode A（残字） | Mode B（干净） |
+|---|---|---|
+| ![](examples/mode-b-vs-a/19-lettered.jpg) | ![](examples/mode-b-vs-a/19-mode-a.jpg) | ![](examples/mode-b-vs-a/19-mode-b.jpg) |
+| ![](examples/mode-b-vs-a/11_0001-lettered.jpg) | ![](examples/mode-b-vs-a/11_0001-mode-a.jpg) | ![](examples/mode-b-vs-a/11_0001-mode-b.jpg) |
+| ![](examples/mode-b-vs-a/14.1-8-lettered.jpg) | ![](examples/mode-b-vs-a/14.1-8-mode-a.jpg) | ![](examples/mode-b-vs-a/14.1-8-mode-b.jpg) |
+
+有同名无字底板时请走 Mode B。
+
+### Mode B · 叠字 / 分镜（干净样本）
 
 | 带字原图 | Mode B 嵌字 |
 |---|---|
-| ![](examples/mode-b-cleanplate/99-before.jpg) | ![](examples/mode-b-cleanplate/99-after.jpg) |
+| ![](examples/mode-b-cleanplate/1-before.jpg) | ![](examples/mode-b-cleanplate/1-after.jpg) |
+| ![](examples/mode-b-cleanplate/66-before.jpg) | ![](examples/mode-b-cleanplate/66-after.jpg) |
+| ![](examples/mode-b-cleanplate/70-before.jpg) | ![](examples/mode-b-cleanplate/70-after.jpg) |
 
 ---
 
