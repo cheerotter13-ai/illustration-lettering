@@ -1,0 +1,13 @@
+.env
+.gemini_ai_studio_key
+*.pyc
+__pycache__/
+logs/
+output/
+input/
+.DS_Store
+Thumbs.db
+.venv/
+venv/
+*.log
+gold_set.json

@@ -1,0 +1,7 @@
+# This script is meant to run inside a Python that already has PyTorch + CUDA
+# (for example the ComfyUI embedded interpreter) plus manga-image-translator.
+# Minimal extra packages:
+opencv-python
+numpy
+Pillow
+python-dotenv
