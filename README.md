@@ -7,6 +7,8 @@
 
 效果对照见 [`examples/`](examples/)。
 
+**Mac / 无 NVIDIA：** 只用 Mode B。入口 `letter_b.py`（或 `letter.py --mode-b --clean …`），依赖 `requirements-b.txt`，不加载 CUDA/LaMa。Grok skill：`.grok/skills/illustration-lettering-b/`。
+
 ---
 
 ## 一张图看懂：哪些必须本地，哪些可以上云

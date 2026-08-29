@@ -1,0 +1,5 @@
+# Mode B only: locate + translate + typeset. No PyTorch / CUDA / manga-image-translator.
+opencv-python-headless
+numpy
+Pillow
+python-dotenv

@@ -51,6 +51,7 @@ VISION = True  # Gemini locate+OCR
 PREFILTER = True  # local CTD: skip Gemini on images with no caption
 TRANSLATE = "auto"
 OLLAMA_SKIP = False
+MODE_B_ONLY = False  # require clean plates; never load CUDA/LaMa
 SAMPLE_GOLD_FILES = (
     "1.jpg",
     "7.jpg",
@@ -68,10 +69,44 @@ SAMPLE_GOLD_FILES = (
     "9.jpg",
 )
 
-FONT_PATHS = {
-    "en": (r"C:\Windows\Fonts\arialbd.ttf", r"C:\Windows\Fonts\msyhbd.ttc", r"C:\Windows\Fonts\arial.ttf"),
-    "ja": (r"C:\Windows\Fonts\YuGothB.ttc", r"C:\Windows\Fonts\msyhbd.ttc", r"C:\Windows\Fonts\msgothic.ttc"),
-}
+def _font_paths() -> dict[str, tuple[str, ...]]:
+    if sys.platform == "darwin":
+        return {
+            "en": (
+                "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+                "/Library/Fonts/Arial Bold.ttf",
+                "/System/Library/Fonts/Supplemental/Arial.ttf",
+                "/System/Library/Fonts/Supplemental/Times New Roman Bold.ttf",
+            ),
+            "ja": (
+                "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
+                "/System/Library/Fonts/Hiragino Sans GB.ttc",
+                "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+                "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            ),
+        }
+    if sys.platform.startswith("linux"):
+        return {
+            "en": (
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                "/usr/share/fonts/opentype/noto/NotoSans-Bold.ttf",
+            ),
+            "ja": (
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            ),
+        }
+    windir = os.environ.get("WINDIR", r"C:\Windows")
+    fonts = Path(windir) / "Fonts"
+    return {
+        "en": (str(fonts / "arialbd.ttf"), str(fonts / "msyhbd.ttc"), str(fonts / "arial.ttf")),
+        "ja": (str(fonts / "YuGothB.ttc"), str(fonts / "msyhbd.ttc"), str(fonts / "msgothic.ttc")),
+    }
+
+
+FONT_PATHS = _font_paths()
 
 _NAME_TABLE: dict | None = None
 
@@ -1935,6 +1970,35 @@ def log_row(path: Path, row: dict) -> None:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def collect_jobs() -> list[dict]:
+    if GOLD_JOBS:
+        jobs = list(GOLD_JOBS)
+        if ONLY:
+            want = set(ONLY)
+            jobs = [j for j in jobs if Path(j["src"]).name in want or j["key"] in want]
+        if CLEAN:
+            for j in jobs:
+                if "clean" not in j:
+                    cp = CLEAN / Path(j["src"]).name
+                    if cp.exists():
+                        j["clean"] = cp
+        return jobs
+    files = sorted(
+        [p for ext in ("*.jpg", "*.jpeg", "*.png") for p in SRC.glob(ext)],
+        key=lambda p: p.name,
+    )
+    if ONLY:
+        want = set(ONLY)
+        files = [f for f in files if f.name in want]
+    jobs = [{"src": f, "dst": DST / f.name, "key": f.name} for f in files]
+    if CLEAN:
+        for j in jobs:
+            cp = CLEAN / Path(j["src"]).name
+            if cp.exists():
+                j["clean"] = cp
+    return jobs
+
+
 async def scan_has_text(det, files: list[Path]) -> dict[str, dict]:
     """Cheap local CTD pass. Prefer false positives over missing overlay captions."""
     out: dict[str, dict] = {}
@@ -2007,31 +2071,49 @@ async def main() -> None:
     )
     trans_cache = load_translation_cache(log_path, LANG)
     print(f"lang={LANG} dst={DST} translation_cache {len(trans_cache)}", flush=True)
+    jobs = collect_jobs()
+    global PREFILTER
+    if MODE_B_ONLY:
+        missing = [Path(j["src"]).name for j in jobs if not j.get("clean")]
+        if missing:
+            raise SystemExit(
+                "mode-b requires a same-name clean plate for every file; missing: "
+                + ", ".join(missing[:20])
+            )
+        PREFILTER = False
+    need_lama = (not MODE_B_ONLY) and any(not j.get("clean") for j in jobs)
+    need_det = bool(PREFILTER) and not MODE_B_ONLY
     det = ocr = lama = None
     inpaint_cfg = ocr_cfg = None
     load_s = 0.0
-    stub_mit()
-    from manga_translator.config import InpainterConfig, OcrConfig
-    from manga_translator.detection.ctd import ComicTextDetector
-    from manga_translator.inpainting.inpainting_lama_mpe import LamaLargeInpainter
-    from manga_translator.ocr.model_48px import Model48pxOCR
+    if need_det or need_lama:
+        stub_mit()
+        from manga_translator.config import InpainterConfig, OcrConfig
+        from manga_translator.detection.ctd import ComicTextDetector
+        from manga_translator.inpainting.inpainting_lama_mpe import LamaLargeInpainter
+        from manga_translator.ocr.model_48px import Model48pxOCR
 
-    device = "cuda"
-    t_load = time.perf_counter()
-    if (not VISION) or PREFILTER:
-        det = ComicTextDetector()
-        det._downloaded = True
-        await det.load(device)
-    if not VISION:
-        ocr = Model48pxOCR()
-        ocr._downloaded = True
-        await ocr.load(device)
-    lama = LamaLargeInpainter()
-    lama._downloaded = True
-    await lama.load(device)
-    load_s = time.perf_counter() - t_load
+        device = "cuda"
+        t_load = time.perf_counter()
+        if need_det:
+            det = ComicTextDetector()
+            det._downloaded = True
+            await det.load(device)
+        if not VISION:
+            ocr = Model48pxOCR()
+            ocr._downloaded = True
+            await ocr.load(device)
+        if need_lama:
+            lama = LamaLargeInpainter()
+            lama._downloaded = True
+            await lama.load(device)
+            inpaint_cfg = InpainterConfig()
+            inpaint_cfg.inpainting_precision = "bf16"
+        ocr_cfg = OcrConfig() if not VISION else None
+        load_s = time.perf_counter() - t_load
     print(
-        f"load_models {load_s:.2f}s vision={VISION} prefilter={PREFILTER} translate={TRANSLATE}",
+        f"load_models {load_s:.2f}s vision={VISION} prefilter={PREFILTER} "
+        f"translate={TRANSLATE} mode_b={MODE_B_ONLY} lama={need_lama}",
         flush=True,
     )
     sys.path.insert(0, str(HERE))
@@ -2039,9 +2121,6 @@ async def main() -> None:
     from vision_locate import google_api_key, zenmux_api_key
 
     print(f"vision_model {_VM} google_key={bool(google_api_key())} zenmux_key={bool(zenmux_api_key())}", flush=True)
-    inpaint_cfg = InpainterConfig()
-    inpaint_cfg.inpainting_precision = "bf16"
-    ocr_cfg = OcrConfig() if not VISION else None
     warm_s = 0.0
     global OLLAMA_SKIP
     if TRANSLATE in ("auto", "local"):
@@ -2055,32 +2134,6 @@ async def main() -> None:
                 raise RuntimeError("translate=local but Ollama/Qwen is not available") from e
             OLLAMA_SKIP = True
             print("translate skip ollama for this process, using gemini", flush=True)
-    jobs = []
-    if GOLD_JOBS:
-        jobs = GOLD_JOBS
-        if ONLY:
-            want = set(ONLY)
-            jobs = [j for j in jobs if Path(j["src"]).name in want or j["key"] in want]
-        if CLEAN:
-            for j in jobs:
-                if "clean" not in j:
-                    cp = CLEAN / Path(j["src"]).name
-                    if cp.exists():
-                        j["clean"] = cp
-    else:
-        files = sorted(
-            [p for ext in ("*.jpg", "*.jpeg", "*.png") for p in SRC.glob(ext)],
-            key=lambda p: p.name,
-        )
-        if ONLY:
-            want = set(ONLY)
-            files = [f for f in files if f.name in want]
-        jobs = [{"src": f, "dst": DST / f.name, "key": f.name} for f in files]
-        if CLEAN:
-            for j in jobs:
-                cp = CLEAN / Path(j["src"]).name
-                if cp.exists():
-                    j["clean"] = cp
     if PREFILTER and jobs:
         if det is None:
             det = ComicTextDetector()
@@ -2733,6 +2786,11 @@ if __name__ == "__main__":
         default="auto",
         help="Caption translation: local Qwen (default auto), Gemini if Ollama is down.",
     )
+    ap.add_argument(
+        "--mode-b",
+        action="store_true",
+        help="Clean-plate only. Requires --clean. Never loads CUDA/LaMa. For Mac/CPU.",
+    )
     ap.add_argument("--regression", action="store_true", help="Run experiments/nsfw_local/regression_set.txt")
     ap.add_argument("--gold", action="store_true", help="Run locked gold_set.json across three series")
     ns = ap.parse_args()
@@ -2780,7 +2838,10 @@ if __name__ == "__main__":
         NAMES_PATH = Path(ns.names)
     CLEAN = Path(ns.clean) if ns.clean else None
     VISION = True
-    PREFILTER = not bool(ns.no_prefilter)
+    MODE_B_ONLY = bool(ns.mode_b)
+    if MODE_B_ONLY and not CLEAN:
+        ap.error("--mode-b requires --clean")
+    PREFILTER = False if MODE_B_ONLY else (not bool(ns.no_prefilter))
     TRANSLATE = ns.translate
     if not ns.gold and (not ns.src or not ns.dst):
         ap.error("provide --src and --dst (or --gold with gold_set.json)")
