@@ -43,11 +43,11 @@
 |---|---|
 | ![](examples/mode-a-comic/0-1-before.jpg) | ![](examples/mode-a-comic/0-1-after.jpg) |
 
-### Mode B 能过、Mode A 过不了
+### Mode B 能过、Mode A 会擦糊
 
-同一张图：Mode A 只有带字原图，LaMa 擦不干净会中英叠字。Mode B 用无字底图，不跑擦字，残字问题直接消失。
+同一张图：Mode A 只有带字原图，要本地 LaMa，腿/天可能擦糊。Mode B 用无字底图，不跑擦字，身体像素保持。
 
-| 原图 | Mode A（残字） | Mode B（干净） |
+| 原图 | Mode A | Mode B（干净底图） |
 |---|---|---|
 | ![](examples/mode-b-vs-a/19-lettered.jpg) | ![](examples/mode-b-vs-a/19-mode-a.jpg) | ![](examples/mode-b-vs-a/19-mode-b.jpg) |
 | ![](examples/mode-b-vs-a/11_0001-lettered.jpg) | ![](examples/mode-b-vs-a/11_0001-mode-a.jpg) | ![](examples/mode-b-vs-a/11_0001-mode-b.jpg) |
@@ -325,7 +325,7 @@ illustration-lettering/
   requirements.txt
   .env.example
   examples/              SFW 对照图
-  VERSION                0.7.0
+  VERSION                0.7.1
 ```
 
 运行时自己出现、不要提交：
@@ -340,6 +340,10 @@ output/
 ---
 
 ## 版本
+
+**v0.7.1** — 2026-08-29
+
+- 用 v0.7 管线重出 README Mode A / Mode B 对照图
 
 **v0.7.0** — 2026-08-29
 
