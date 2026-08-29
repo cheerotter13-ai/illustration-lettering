@@ -51,7 +51,7 @@ VISION = True  # Gemini locate+OCR
 PREFILTER = True  # local CTD: skip Gemini on images with no caption
 TRANSLATE = "auto"
 OLLAMA_SKIP = False
-QINGGE_GOLD_FILES = (
+SAMPLE_GOLD_FILES = (
     "1.jpg",
     "7.jpg",
     "32.jpg",
@@ -1897,7 +1897,7 @@ def load_translation_cache(path: Path, lang: str) -> dict:
     cache = {}
     paths = [path]
     if lang == "en":
-        legacy = LOG_DIR / "qingge_batch.jsonl"
+        legacy = LOG_DIR / "lettering_batch.jsonl"
         if legacy != path:
             paths.append(legacy)
     for p in paths:
@@ -2001,9 +2001,9 @@ async def scan_has_text(det, files: list[Path]) -> dict[str, dict]:
 async def main() -> None:
     t_all = time.perf_counter()
     DST.mkdir(parents=True, exist_ok=True)
-    log_path = LOG_DIR / f"qingge_{LANG}.jsonl"
+    log_path = LOG_DIR / f"lettering_{LANG}.jsonl"
     summary_path = LOG_DIR / (
-        f"qingge_{LANG}_sample_summary.json" if ONLY else f"qingge_{LANG}_summary.json"
+        f"lettering_{LANG}_sample_summary.json" if ONLY else f"lettering_{LANG}_summary.json"
     )
     trans_cache = load_translation_cache(log_path, LANG)
     print(f"lang={LANG} dst={DST} translation_cache {len(trans_cache)}", flush=True)
@@ -2103,11 +2103,11 @@ async def main() -> None:
             encoding="utf-8",
         )
         print("prefilter_json", scan_path, flush=True)
-        gold_hit = [n for n in QINGGE_GOLD_FILES if n in scan]
+        gold_hit = [n for n in SAMPLE_GOLD_FILES if n in scan]
         gold_miss = [n for n in gold_hit if not scan[n].get("has_text")]
         if gold_hit:
             print(
-                f"prefilter gold_qingge labeled={len(gold_hit)}/{len(QINGGE_GOLD_FILES)} "
+                f"prefilter gold_sample labeled={len(gold_hit)}/{len(SAMPLE_GOLD_FILES)} "
                 f"missed_as_blank={gold_miss}",
                 flush=True,
             )

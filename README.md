@@ -1,6 +1,6 @@
 # illustration-lettering v0.8
 
-插画 / 漫画 **中文配文 → 英文（或日文）嵌字** 管线。私有仓库。把带中文字幕的图丢进一个文件夹，即可批量出译文字幕图。
+插画 / 漫画 **中文配文 → 英文（或日文）嵌字** 管线。把带中文字幕的图丢进一个文件夹，即可批量出译文字幕图。
 
 - **Mode B（推荐）**：你提供「无字底图」时，不跑擦字，只定位+翻译+把字打在底图上。脸和身体保持原像素。
 - **Mode A**：只有带字原图时，云端 Vision 出框 → 本地 LaMa 擦中文 → 再嵌翻译。v0.7 加厚 overlay/SFX 掩膜并二次补擦，插画叠字已作为主路径锁定。
@@ -78,21 +78,16 @@
 ### 1. 克隆
 
 ```bat
-git clone git@github-cheerotter13-ai:cheerotter13-ai/illustration-lettering.git
+git clone https://github.com/cheerotter13-ai/illustration-lettering.git
 cd illustration-lettering
 ```
 
-若尚未配置该账号 SSH，把 `~/.ssh/config` 写成：
+或使用 SSH：
 
+```bat
+git clone git@github.com:cheerotter13-ai/illustration-lettering.git
+cd illustration-lettering
 ```
-Host github-cheerotter13-ai
-    HostName github.com
-    User git
-    IdentityFile C:/Users/ROG/.ssh/id_ed25519_cheerotter13_ai_codex
-    IdentitiesOnly yes
-```
-
-HTTPS 也行：`https://github.com/cheerotter13-ai/illustration-lettering.git`（私有仓库，用有权限的账号登录）。
 
 ### 2. Python 依赖
 
@@ -182,7 +177,7 @@ python letter.py --retranslate --lang ja --src my-job\lettered --dst my-job\out
 python letter.py --retranslate --lang en --src my-job\lettered --dst my-job\out --only 99.jpg "0 (1).jpg"
 ```
 
-跑完看 `out\` 和 `logs\qingge_en.jsonl`。
+跑完看 `out\` 和 `logs\lettering_en.jsonl`。
 
 ---
 
