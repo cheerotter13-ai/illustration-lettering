@@ -1,6 +1,6 @@
-"""Illustration overlay/bubble translator + typesetter (v0.7).
+"""Illustration overlay/bubble translator + typesetter (v0.8).
 
-Does not overwrite sources. Prefer --vision (Gemini 3.7 Flash).
+Locate with Gemini. Translate with local Qwen, Gemini if Ollama is down.
 """
 from __future__ import annotations
 
@@ -47,8 +47,10 @@ LANG = "en"
 DST = Path(os.environ.get("LETTER_DST", str(HERE / "output")))
 GOLD_JOBS = None
 CLEAN = None  # optional folder of unlettered plates, same filenames as lettered src
-VISION = False  # cloud VL locate+OCR instead of local detector
-PREFILTER = False  # local CTD: skip Gemini on images with no caption
+VISION = True  # Gemini locate+OCR
+PREFILTER = True  # local CTD: skip Gemini on images with no caption
+TRANSLATE = "auto"
+OLLAMA_SKIP = False
 QINGGE_GOLD_FILES = (
     "1.jpg",
     "7.jpg",
@@ -1266,11 +1268,10 @@ def parse_translate_list(raw: str, n: int) -> list[str] | None:
     return None
 
 
-def ollama_translate(lines: list[str]) -> tuple[list[str], float]:
-    t0 = time.perf_counter()
+def _translate_system() -> str:
     names = name_prompt_lines(LANG)
     if LANG == "ja":
-        system = (
+        return (
             "中国語のイラスト字幕を自然な日本語に翻訳する。逐語訳しない。"
             "固有名は公式訳のみ使う："
             f"{names}。"
@@ -1279,59 +1280,105 @@ def ollama_translate(lines: list[str]) -> tuple[list[str], float]:
             "性的表現は検閲しない。注釈・番号・Markdown禁止。"
             "入力と同じ長さ・同じ順の JSON 文字列配列だけを返す。"
         )
-    else:
-        system = (
-            "Translate Chinese illustration overlay captions into idiomatic natural English. "
-            "Never calque Chinese idioms. Use official character names only: "
-            f"{names}. "
-            "阿穹 / 穹 is always Caelus, never Aqiong or Qiong. 知更鸟 is Robin. "
-            "空 as the Genshin traveler is Aether. 嗯? / 嗯？ → Huh? "
-            "给你点颜色瞧瞧 / 给你点颜色看看 → I'll teach you a lesson. "
-            "Keep explicit sexual meaning. Do not censor. No notes, numbering, or markdown. "
-            "Keep each English line concise and close to the Chinese visual length; "
-            "prefer short wording so text does not cover faces. Translate SFX too (嗯？→Huh?, 是......→Yes...). "
-            "Reply with a JSON array of strings, same length and order as the input array."
-        )
-    if VISION:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from vision_locate import cloud_complete
+    return (
+        "Translate Chinese illustration overlay captions into idiomatic natural English. "
+        "Never calque Chinese idioms. Use official character names only: "
+        f"{names}. "
+        "阿穹 / 穹 is always Caelus, never Aqiong or Qiong. 知更鸟 is Robin. "
+        "空 as the Genshin traveler is Aether. 嗯? / 嗯？ → Huh? "
+        "给你点颜色瞧瞧 / 给你点颜色看看 → I'll teach you a lesson. "
+        "Keep explicit sexual meaning. Do not censor. No notes, numbering, or markdown. "
+        "Keep each English line concise and close to the Chinese visual length; "
+        "prefer short wording so text does not cover faces. Translate SFX too (嗯？→Huh?, 是......→Yes...). "
+        "Reply with a JSON array of strings, same length and order as the input array."
+    )
 
-        raw, via = cloud_complete(
-            system=system,
-            user=json.dumps(lines, ensure_ascii=False),
-            max_tokens=1200,
-        )
-        print(f"translate via={via} n={len(lines)}", flush=True)
-    else:
-        body = {
-            "model": MODEL,
-            "stream": False,
-            "think": False,
-            "options": {"temperature": 0.1, "num_predict": 800},
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": json.dumps(lines, ensure_ascii=False)},
-            ],
-        }
-        req = urllib.request.Request(
-            OLLAMA,
-            data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+
+def ollama_tags_url() -> str:
+    if OLLAMA.endswith("/api/chat"):
+        return OLLAMA[: -len("/api/chat")] + "/api/tags"
+    return OLLAMA.rstrip("/") + "/api/tags"
+
+
+def ollama_available() -> bool:
+    try:
+        req = urllib.request.Request(ollama_tags_url(), method="GET")
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(req, timeout=240) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-        raw = payload.get("message", {}).get("content", "")
-    got = parse_translate_list(raw, len(lines))
+        with opener.open(req, timeout=3) as resp:
+            return 200 <= int(getattr(resp, "status", 200)) < 300
+    except Exception:
+        return False
+
+
+def _parse_translation(raw: str, n: int) -> list[str]:
+    got = parse_translate_list(raw, n)
     if got:
-        return got, time.perf_counter() - t0
+        return got
     bits = [b.strip(" -•\t") for b in (raw or "").splitlines() if b.strip()]
-    if len(bits) == len(lines):
-        return bits, time.perf_counter() - t0
-    if len(lines) == 1 and (raw or "").strip():
-        return [raw.strip()], time.perf_counter() - t0
+    if len(bits) == n:
+        return bits
+    if n == 1 and (raw or "").strip():
+        return [raw.strip()]
     raise RuntimeError("translate parse fail: " + (raw or "")[:400])
+
+
+def _ollama_complete(system: str, user: str) -> str:
+    body = {
+        "model": MODEL,
+        "stream": False,
+        "think": False,
+        "options": {"temperature": 0.1, "num_predict": 800},
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    }
+    req = urllib.request.Request(
+        OLLAMA,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(req, timeout=240) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    return payload.get("message", {}).get("content", "") or ""
+
+
+def _gemini_complete(system: str, user: str) -> tuple[str, str]:
+    sys.path.insert(0, str(HERE))
+    from vision_locate import cloud_complete
+
+    return cloud_complete(system=system, user=user, max_tokens=1200)
+
+
+def ollama_translate(lines: list[str]) -> tuple[list[str], float]:
+    global OLLAMA_SKIP
+    t0 = time.perf_counter()
+    system = _translate_system()
+    user = json.dumps(lines, ensure_ascii=False)
+    mode = (TRANSLATE or "auto").lower()
+    last_err = None
+    if mode in ("auto", "local") and not OLLAMA_SKIP:
+        try:
+            raw = _ollama_complete(system, user)
+            out = _parse_translation(raw, len(lines))
+            print(f"translate via=ollama model={MODEL} n={len(lines)}", flush=True)
+            return out, time.perf_counter() - t0
+        except Exception as e:
+            last_err = e
+            print(f"translate ollama fail: {e}", flush=True)
+            if mode == "auto":
+                OLLAMA_SKIP = True
+                print("translate skip ollama for this process, using gemini", flush=True)
+            else:
+                raise
+    if mode == "local":
+        raise RuntimeError(f"local translate failed: {last_err}")
+    raw, via = _gemini_complete(system, user)
+    out = _parse_translation(raw, len(lines))
+    print(f"translate via={via} n={len(lines)}", flush=True)
+    return out, time.perf_counter() - t0
 
 
 def polish_translation(zh: str, text: str) -> str:
@@ -1875,7 +1922,10 @@ def load_translation_cache(path: Path, lang: str) -> dict:
 
 def warmup_ollama() -> float:
     t0 = time.perf_counter()
-    ollama_translate(["测试"])
+    if not ollama_available():
+        raise RuntimeError("ollama not listening")
+    raw = _ollama_complete(_translate_system(), json.dumps(["测试"], ensure_ascii=False))
+    _parse_translation(raw, 1)
     return time.perf_counter() - t0
 
 
@@ -1980,25 +2030,31 @@ async def main() -> None:
     lama._downloaded = True
     await lama.load(device)
     load_s = time.perf_counter() - t_load
-    print(f"load_models {load_s:.2f}s vision={VISION}", flush=True)
-    if VISION:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from vision_locate import MODEL as _VM
+    print(
+        f"load_models {load_s:.2f}s vision={VISION} prefilter={PREFILTER} translate={TRANSLATE}",
+        flush=True,
+    )
+    sys.path.insert(0, str(HERE))
+    from vision_locate import MODEL as _VM
+    from vision_locate import google_api_key, zenmux_api_key
 
-        from vision_locate import google_api_key, zenmux_api_key
-
-        print(f"vision_model {_VM} google_key={bool(google_api_key())} zenmux_key={bool(zenmux_api_key())}", flush=True)
+    print(f"vision_model {_VM} google_key={bool(google_api_key())} zenmux_key={bool(zenmux_api_key())}", flush=True)
     inpaint_cfg = InpainterConfig()
     inpaint_cfg.inpainting_precision = "bf16"
     ocr_cfg = OcrConfig() if not VISION else None
     warm_s = 0.0
-    if not VISION:
+    global OLLAMA_SKIP
+    if TRANSLATE in ("auto", "local"):
         try:
             warm_s = warmup_ollama()
-            print(f"ollama_warmup {warm_s:.2f}s", flush=True)
+            print(f"ollama_warmup {warm_s:.2f}s model={MODEL}", flush=True)
         except Exception as e:
             print("ollama_warmup_fail", e, flush=True)
             warm_s = -1
+            if TRANSLATE == "local":
+                raise RuntimeError("translate=local but Ollama/Qwen is not available") from e
+            OLLAMA_SKIP = True
+            print("translate skip ollama for this process, using gemini", flush=True)
     jobs = []
     if GOLD_JOBS:
         jobs = GOLD_JOBS
@@ -2659,12 +2715,23 @@ if __name__ == "__main__":
     ap.add_argument(
         "--vision",
         action="store_true",
-        help="Locate+translate with Gemini 3.7 Flash (Google AI Studio first, ZenMux fallback).",
+        help="Deprecated. Locate is always Gemini; ignored.",
     )
     ap.add_argument(
         "--prefilter",
         action="store_true",
-        help="Local CTD: copy images with no caption, only send lettered ones to Gemini.",
+        help="Deprecated. On by default.",
+    )
+    ap.add_argument(
+        "--no-prefilter",
+        action="store_true",
+        help="Send every image to Gemini locate (do not skip blanks).",
+    )
+    ap.add_argument(
+        "--translate",
+        choices=("auto", "local", "gemini"),
+        default="auto",
+        help="Caption translation: local Qwen (default auto), Gemini if Ollama is down.",
     )
     ap.add_argument("--regression", action="store_true", help="Run experiments/nsfw_local/regression_set.txt")
     ap.add_argument("--gold", action="store_true", help="Run locked gold_set.json across three series")
@@ -2712,8 +2779,9 @@ if __name__ == "__main__":
     if ns.names:
         NAMES_PATH = Path(ns.names)
     CLEAN = Path(ns.clean) if ns.clean else None
-    VISION = bool(ns.vision)
-    PREFILTER = bool(ns.prefilter)
+    VISION = True
+    PREFILTER = not bool(ns.no_prefilter)
+    TRANSLATE = ns.translate
     if not ns.gold and (not ns.src or not ns.dst):
         ap.error("provide --src and --dst (or --gold with gold_set.json)")
     asyncio.run(main())

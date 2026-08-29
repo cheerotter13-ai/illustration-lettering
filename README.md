@@ -1,4 +1,4 @@
-# illustration-lettering v0.7
+# illustration-lettering v0.8
 
 插画 / 漫画 **中文配文 → 英文（或日文）嵌字** 管线。私有仓库。把带中文字幕的图丢进一个文件夹，即可批量出译文字幕图。
 
@@ -13,13 +13,13 @@
 
 | 步骤 | 做什么 | 推荐 | NSFW 注意 |
 |---|---|---|---|
-| **定位 + 读中文** | 从图上找出每句中文和框 | **云端** Gemini 3.7 Flash（`--vision`） | 只上传图片做**分析**，不生图。Google 若拒图，自动改走 ZenMux |
-| **翻译** | 中文字符串 → 英文/日文 | **云端** 同一个 Gemini 3.7 Flash | 走文本 JSON，不传图。也可改成本地 Ollama 不审查模型（不加 `--vision`） |
+| **定位 + 读中文** | 从图上找出每句中文和框 | **云端** Gemini 3.7 Flash（默认） | 只上传图片做**分析**，不生图。Google 若拒图，自动改走 ZenMux |
+| **翻译** | 中文字符串 → 英文/日文 | **默认本地** Ollama `qwen3.8:27b-uncensored`；本机没有再走 Gemini 文本 | 不传图。`--translate gemini` 可强制云端；`--translate local` 本机没有就失败 |
 | **擦字（仅 Mode A）** | 去掉原图中文 | **必须本地** manga-image-translator 的 LaMa | 不要用云端 image-edit 去抹 NSFW，会被审、还会改画 |
 | **嵌字** | 把译文画回图上 | **本地代码**（Pillow） | 不经过任何云端 |
 | **无字底图（Mode B）** | 你自己准备干净底板 | 人工 / 你现有的去字流程 | 本仓库不调用云端生图 |
 
-**一句话**：云端只负责「看见字 + 翻译字」；擦字和写字都在你电脑上。`--vision` 是 v0.7 的默认用法。
+**一句话**：Gemini 只负责看图定位；翻译默认本机 Qwen 无审查；擦字和写字都在你电脑上。
 
 ---
 
@@ -134,7 +134,7 @@ MIT_ROOT=D:\manga-image-translator
 2. 创建 API key
 3. 填入 `GEMINI_API_KEY`
 
-v0.7 **优先用这个免费 key** 调 `gemini-3.7-flash`（定位+翻译）。503 / 429 / 内容拦截时自动改 ZenMux，不必你改命令。
+定位用 `gemini-3.7-flash`。503 / 429 / 内容拦截时自动改 ZenMux，不必你改命令。翻译默认不走这个 key（走本机 Qwen）。
 
 **ZenMux（备用）**
 
@@ -161,25 +161,25 @@ my-job/
 Mode B（有底图，推荐）：
 
 ```bat
-python letter.py --vision --retranslate --lang en --src my-job\lettered --clean my-job\clean --dst my-job\out
+python letter.py --retranslate --lang en --src my-job\lettered --clean my-job\clean --dst my-job\out
 ```
 
 Mode A（只有带字原图）：
 
 ```bat
-python letter.py --vision --retranslate --lang en --src my-job\lettered --dst my-job\out
+python letter.py --retranslate --lang en --src my-job\lettered --dst my-job\out
 ```
 
 日文：
 
 ```bat
-python letter.py --vision --retranslate --lang ja --src my-job\lettered --dst my-job\out
+python letter.py --retranslate --lang ja --src my-job\lettered --dst my-job\out
 ```
 
 只跑某几张：
 
 ```bat
-python letter.py --vision --retranslate --lang en --src my-job\lettered --dst my-job\out --only 99.jpg "0 (1).jpg"
+python letter.py --retranslate --lang en --src my-job\lettered --dst my-job\out --only 99.jpg "0 (1).jpg"
 ```
 
 跑完看 `out\` 和 `logs\qingge_en.jsonl`。
@@ -193,14 +193,15 @@ python letter.py --vision --retranslate --lang en --src my-job\lettered --dst my
 | `--src DIR` | 带中文原图目录 |
 | `--dst DIR` | 输出目录 |
 | `--clean DIR` | 同名无字底图 → **Mode B**，跳过 LaMa |
-| `--vision` | 云端 Gemini 定位+翻译（v0.7 请开） |
+| `--translate auto\|local\|gemini` | 翻译后端。默认 `auto`：本机 Qwen，没有再 Gemini |
+| `--no-prefilter` | 每张都送给 Gemini 定位（默认会跳过无字幕图） |
 | `--retranslate` | 忽略缓存，重新翻译 |
 | `--lang en\|ja` | 目标语言 |
 | `--only a.jpg b.jpg` | 只处理这些文件名 |
 | `--mit-root DIR` | manga-image-translator 根目录 |
 | `--names names.json` | 角色名表 |
 
-不加 `--vision` 时走本地 ComicTextDetector + 48px OCR + Ollama。这是旧路径，叠字/竖气泡明显更差，只留给断网或必须本地读字的情况。
+定位固定走 Gemini。旧的本地 CTD+OCR 读字路径已去掉。`--vision` 仍可写，但会被忽略。
 
 ---
 
@@ -212,19 +213,16 @@ python letter.py --vision --retranslate --lang en --src my-job\lettered --dst my
 - 为什么本地：云端改图会改画、缩分辨率，明确 NSFW 还会直接拒
 - GPU：默认 `cuda`，权重由 MIT 自己管理（按其 README 放到 `models/`）
 
-### 可选本地：检测 + OCR（仅无 `--vision`）
+### 默认本地：翻译（Ollama Qwen）
 
-- ComicTextDetector
-- Model48pxOCR
-- 同样来自 MIT
+- 地址：`http://127.0.0.1:11434/api/chat`
+- 模型：`qwen3.8:27b-uncensored`（可用环境变量 `OLLAMA_MODEL` / `OLLAMA_HOST` 改）
+- 本机没开 Ollama 时，`auto` 会改走 Gemini 文本翻译，本进程不再试本地
 
-### 可选本地：翻译（仅无 `--vision`）
+### 预过滤：ComicTextDetector
 
-- Ollama，默认模型名 `qwen3.8:27b-uncensored`
-- 用途：中→英且内容不能过审时，用本机不审查模型
-- 启动：`ollama serve`，拉好对应模型
-
-`--vision` 打开后 **不跑 Ollama、不跑 CTD/OCR**，只加载 LaMa（Mode A）或连 LaMa 都不跑（Mode B）。
+- 用来判断图上有没有字幕，避免空图上传 Gemini
+- `--no-prefilter` 关闭
 
 ### 字体（本地）
 
@@ -299,14 +297,14 @@ ZenMux：
 
 | 你有什么 | 用什么 |
 |---|---|
-| 只有带中文的图 | Mode A：`--src` `--dst` `--vision` |
+| 只有带中文的图 | Mode A：`--src` `--dst` |
 | 另有同名无字底图 | Mode B：再加上 `--clean` |
 | 大白对话框、要最干净 | 尽量 Mode B；Mode A 会 LaMa 填洞，偶发发脏或残字 |
 | 插画叠字（字打在画上） | Mode A 已经可用；Mode B 仍然更稳 |
 
 ---
 
-## 已知限制（v0.7）
+## 已知限制（v0.8）
 
 - 大号 SFX 整框擦字可能在天空/身体上留下污块（如「咿呀」类）。
 - 贴在皮肤上的 overlay 偶发轻糊，比叠中文可接受。
@@ -325,7 +323,7 @@ illustration-lettering/
   requirements.txt
   .env.example
   examples/              SFW 对照图
-  VERSION                0.7.1
+  VERSION                0.8.0
 ```
 
 运行时自己出现、不要提交：
@@ -340,6 +338,12 @@ output/
 ---
 
 ## 版本
+
+**v0.8.0** — 2026-08-29
+
+- 定位默认且仅用 Gemini；去掉本地 CTD+OCR 读字主路径
+- 翻译默认本机 Qwen 无审查，Ollama 不可用再 Gemini（`--translate auto|local|gemini`）
+- 预过滤默认开启
 
 **v0.7.1** — 2026-08-29
 
