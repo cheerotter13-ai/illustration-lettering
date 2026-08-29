@@ -1,9 +1,9 @@
-# illustration-lettering v0.6
+# illustration-lettering v0.7
 
 插画 / 漫画 **中文配文 → 英文（或日文）嵌字** 管线。私有仓库。把带中文字幕的图丢进一个文件夹，即可批量出译文字幕图。
 
 - **Mode B（推荐）**：你提供「无字底图」时，不跑擦字，只定位+翻译+把字打在底图上。脸和身体保持原像素。
-- **Mode A**：只有带字原图时，云端 Vision 出框 → 本地 LaMa 擦中文 → 再嵌翻译。叠字效果已经可用；大白气泡偶发残字/发脏。
+- **Mode A**：只有带字原图时，云端 Vision 出框 → 本地 LaMa 擦中文 → 再嵌翻译。v0.7 加厚 overlay/SFX 掩膜并二次补擦，插画叠字已作为主路径锁定。
 
 效果对照见 [`examples/`](examples/)。
 
@@ -19,7 +19,7 @@
 | **嵌字** | 把译文画回图上 | **本地代码**（Pillow） | 不经过任何云端 |
 | **无字底图（Mode B）** | 你自己准备干净底板 | 人工 / 你现有的去字流程 | 本仓库不调用云端生图 |
 
-**一句话**：云端只负责「看见字 + 翻译字」；擦字和写字都在你电脑上。`--vision` 是 v0.6 的默认用法。
+**一句话**：云端只负责「看见字 + 翻译字」；擦字和写字都在你电脑上。`--vision` 是 v0.7 的默认用法。
 
 ---
 
@@ -134,7 +134,7 @@ MIT_ROOT=D:\manga-image-translator
 2. 创建 API key
 3. 填入 `GEMINI_API_KEY`
 
-v0.6 **优先用这个免费 key** 调 `gemini-3.7-flash`（定位+翻译）。503 / 429 / 内容拦截时自动改 ZenMux，不必你改命令。
+v0.7 **优先用这个免费 key** 调 `gemini-3.7-flash`（定位+翻译）。503 / 429 / 内容拦截时自动改 ZenMux，不必你改命令。
 
 **ZenMux（备用）**
 
@@ -193,7 +193,7 @@ python letter.py --vision --retranslate --lang en --src my-job\lettered --dst my
 | `--src DIR` | 带中文原图目录 |
 | `--dst DIR` | 输出目录 |
 | `--clean DIR` | 同名无字底图 → **Mode B**，跳过 LaMa |
-| `--vision` | 云端 Gemini 定位+翻译（v0.6 请开） |
+| `--vision` | 云端 Gemini 定位+翻译（v0.7 请开） |
 | `--retranslate` | 忽略缓存，重新翻译 |
 | `--lang en\|ja` | 目标语言 |
 | `--only a.jpg b.jpg` | 只处理这些文件名 |
@@ -306,13 +306,12 @@ ZenMux：
 
 ---
 
-## 已知限制（v0.6）
+## 已知限制（v0.7）
 
-- Mode A 大约仍有一部分图会 **中英叠字**（擦得不干净）。金标准英语抽查大约 13/40 有残字，叠字类大部分能过。
+- 大号 SFX 整框擦字可能在天空/身体上留下污块（如「咿呀」类）。
+- 贴在皮肤上的 overlay 偶发轻糊，比叠中文可接受。
 - 贴在亮背景上的细长椭圆，英文可能偏小。
-- 手写贴纸拟声（呜呜/颤抖）可能擦不干净。
 - Google AI Studio 免费档经常 503，备用 ZenMux 是正常路径，不是失败。
-- 日语金标准尚未用本版本全量验收。
 
 ---
 
@@ -326,7 +325,7 @@ illustration-lettering/
   requirements.txt
   .env.example
   examples/              SFW 对照图
-  VERSION                0.6.0
+  VERSION                0.7.0
 ```
 
 运行时自己出现、不要提交：
@@ -341,6 +340,15 @@ output/
 ---
 
 ## 版本
+
+**v0.7.0** — 2026-08-29
+
+- 锁定 Mode A+Vision 为主擦字路径（无底图叠字）
+- overlay/SFX 掩膜吃描边；小面积 SFX 可整框
+- LaMa 后最多两轮补擦
+- 嵌字 skip 仅当掩膜漏检且擦完仍像原文笔画
+- `--skip-done` 只认 jsonl 最后状态，且 dest 不能是源图拷贝
+- 定位也框已写在画上的英文时间戳/标题；场景霓虹仍跳过
 
 **v0.6.0** — 2026-08-29
 

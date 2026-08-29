@@ -1,4 +1,4 @@
-"""Illustration overlay/bubble translator + typesetter (v0.6).
+"""Illustration overlay/bubble translator + typesetter (v0.7).
 
 Does not overwrite sources. Prefer --vision (Gemini 3.7 Flash).
 """
@@ -48,6 +48,23 @@ DST = Path(os.environ.get("LETTER_DST", str(HERE / "output")))
 GOLD_JOBS = None
 CLEAN = None  # optional folder of unlettered plates, same filenames as lettered src
 VISION = False  # cloud VL locate+OCR instead of local detector
+PREFILTER = False  # local CTD: skip Gemini on images with no caption
+QINGGE_GOLD_FILES = (
+    "1.jpg",
+    "7.jpg",
+    "32.jpg",
+    "38.jpg",
+    "0.jpg",
+    "19.jpg",
+    "16.jpg",
+    "70.jpg",
+    "14.1 (8).jpg",
+    "14.1 (14).jpg",
+    "66.jpg",
+    "14.1 (3).jpg",
+    "60 (45).jpg",
+    "9.jpg",
+)
 
 FONT_PATHS = {
     "en": (r"C:\Windows\Fonts\arialbd.ttf", r"C:\Windows\Fonts\msyhbd.ttc", r"C:\Windows\Fonts\arial.ttf"),
@@ -1642,6 +1659,52 @@ def leftover_after_lama(orig: np.ndarray, inpainted: np.ndarray, box) -> bool:
     return n_still >= 50 and n_still / n_ink >= 0.12
 
 
+def should_skip_incomplete(*, vision: bool, mask_miss: bool, lama_left: bool) -> bool:
+    """Vision: skip typeset only if the mask missed glyphs *and* LaMa left them."""
+    if vision:
+        return bool(mask_miss and lama_left)
+    return bool(mask_miss)
+
+
+def overlay_erase_mask(rgb: np.ndarray, box, kind: str = "") -> np.ndarray:
+    """Cover overlay/SFX fill, dark strokes, and white/color outlines inside the box."""
+    h, w = rgb.shape[:2]
+    x, y, bw, bh = [int(v) for v in box[:4]]
+    pad = 12
+    x0, y0 = max(0, x - pad), max(0, y - pad)
+    x1, y1 = min(w, x + bw + pad), min(h, y + bh + pad)
+    out = np.zeros((h, w), np.uint8)
+    if x1 <= x0 or y1 <= y0:
+        return out
+    roi = rgb[y0:y1, x0:x1]
+    gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
+    chroma = roi.max(axis=2) - roi.min(axis=2)
+    ink = _chroma_ink(rgb)[y0:y1, x0:x1]
+    dark = (gray < 92).astype(np.uint8) * 255
+    white = ((gray >= 185) & (chroma < 70)).astype(np.uint8) * 255
+    near_w = cv2.dilate(white, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+    outlined = ((gray < 88) & (near_w > 0)).astype(np.uint8) * 255
+    glyphs = np.maximum(np.maximum(ink, dark), outlined)
+    fill = _sample_glyph_color(roi)
+    if fill is not None:
+        dist = np.linalg.norm(roi.astype(np.float32) - fill.reshape(1, 1, 3), axis=2)
+        glyphs = np.maximum(glyphs, (dist < 62).astype(np.uint8) * 255)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    glyphs = cv2.morphologyEx(glyphs, cv2.MORPH_CLOSE, k)
+    glyphs = cv2.dilate(glyphs, k)
+    area = max((x1 - x0) * (y1 - y0), 1)
+    frac = float(np.count_nonzero(glyphs)) / area
+    box_area = max(bw * bh, 1)
+    kind_l = (kind or "").lower()
+    sfx = kind_l == "sfx"
+    if (sfx and box_area <= int(0.12 * h * w)) or (
+        frac >= 0.16 and box_area <= int(0.08 * h * w)
+    ):
+        glyphs[:, :] = 255
+    out[y0:y1, x0:x1] = glyphs
+    return out
+
+
 def leftover_caption_ink(rgb: np.ndarray, mask: np.ndarray, box) -> bool:
     """True when original glyphs in this caption were not fully covered by the mask."""
     x, y, bw, bh = [int(v) for v in box[:4]]
@@ -1707,9 +1770,9 @@ def mask_from_vision_items(rgb: np.ndarray, items: list[dict]) -> np.ndarray:
                 out[ny : ny + nh, nx : nx + nw], combined
             )
         else:
-            one = mask_from_items(out, [it], rgb, pad=6)
+            one = overlay_erase_mask(rgb, box, kind)
             out = np.maximum(out, one)
-    return expand_mask(out, 4)
+    return expand_mask(out, 6)
 
 
 def strip_skin_from_mask(rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -1822,6 +1885,69 @@ def log_row(path: Path, row: dict) -> None:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+async def scan_has_text(det, files: list[Path]) -> dict[str, dict]:
+    """Cheap local CTD pass. Prefer false positives over missing overlay captions."""
+    out: dict[str, dict] = {}
+    t0 = time.perf_counter()
+    for i, f in enumerate(files, 1):
+        t1 = time.perf_counter()
+        try:
+            bgr = load_bgr(f)
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            h, w = rgb.shape[:2]
+            lines, raw, mask = await det.detect(
+                rgb,
+                detect_size=1024,
+                text_threshold=0.4,
+                box_threshold=0.55,
+                unclip_ratio=2.5,
+                invert=False,
+                gamma_correct=False,
+                rotate=False,
+                auto_rotate=False,
+                verbose=False,
+            )
+            if mask is None:
+                mask = raw if raw is not None else np.zeros((h, w), np.uint8)
+            if mask.ndim == 3:
+                mask = mask[:, :, 0]
+            n_lines = len(lines or [])
+            pct = float(np.count_nonzero(mask) * 100.0 / max(mask.size, 1))
+            has = n_lines >= 1 or pct >= 0.04
+            rec = {
+                "file": f.name,
+                "has_text": has,
+                "lines": n_lines,
+                "mask_pct": round(pct, 3),
+                "detect_s": round(time.perf_counter() - t1, 3),
+                "w": w,
+                "h": h,
+            }
+        except Exception as e:
+            rec = {
+                "file": f.name,
+                "has_text": True,
+                "lines": -1,
+                "mask_pct": -1,
+                "detect_s": round(time.perf_counter() - t1, 3),
+                "error": str(e)[:200],
+            }
+        out[f.name] = rec
+        if i % 25 == 0 or i == len(files):
+            print(
+                f"prefilter {i}/{len(files)} {f.name} has_text={rec.get('has_text')} "
+                f"lines={rec.get('lines')} mask={rec.get('mask_pct')}%",
+                flush=True,
+            )
+    n_yes = sum(1 for r in out.values() if r.get("has_text"))
+    print(
+        f"prefilter done n={len(out)} has_text={n_yes} no_text={len(out) - n_yes} "
+        f"{time.perf_counter() - t0:.1f}s",
+        flush=True,
+    )
+    return out
+
+
 async def main() -> None:
     t_all = time.perf_counter()
     DST.mkdir(parents=True, exist_ok=True)
@@ -1842,10 +1968,11 @@ async def main() -> None:
 
     device = "cuda"
     t_load = time.perf_counter()
-    if not VISION:
+    if (not VISION) or PREFILTER:
         det = ComicTextDetector()
         det._downloaded = True
         await det.load(device)
+    if not VISION:
         ocr = Model48pxOCR()
         ocr._downloaded = True
         await ocr.load(device)
@@ -1898,6 +2025,40 @@ async def main() -> None:
                 cp = CLEAN / Path(j["src"]).name
                 if cp.exists():
                     j["clean"] = cp
+    if PREFILTER and jobs:
+        if det is None:
+            det = ComicTextDetector()
+            det._downloaded = True
+            await det.load(device)
+        scan = await scan_has_text(det, [j["src"] for j in jobs])
+        scan_path = LOG_DIR / f"text_scan_{LANG}.json"
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        scan_path.write_text(
+            json.dumps(
+                {
+                    "n": len(scan),
+                    "has_text": sum(1 for r in scan.values() if r.get("has_text")),
+                    "no_text": sum(1 for r in scan.values() if not r.get("has_text")),
+                    "rows": list(scan.values()),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print("prefilter_json", scan_path, flush=True)
+        gold_hit = [n for n in QINGGE_GOLD_FILES if n in scan]
+        gold_miss = [n for n in gold_hit if not scan[n].get("has_text")]
+        if gold_hit:
+            print(
+                f"prefilter gold_qingge labeled={len(gold_hit)}/{len(QINGGE_GOLD_FILES)} "
+                f"missed_as_blank={gold_miss}",
+                flush=True,
+            )
+        for j in jobs:
+            rec = scan.get(Path(j["src"]).name)
+            if rec and not rec.get("has_text"):
+                j["no_text"] = True
     stats = {
         "start": time.strftime("%Y-%m-%d %H:%M:%S"),
         "n": len(jobs),
@@ -1915,6 +2076,15 @@ async def main() -> None:
         t_img = time.perf_counter()
         row = {"file": cache_key, "i": i}
         try:
+            if job.get("no_text"):
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                stats["passthrough"] += 1
+                row["status"] = "passthrough_no_text"
+                row["total_s"] = round(time.perf_counter() - t_img, 3)
+                print(f"{i}/{len(jobs)} passthrough_no_text {cache_key}", flush=True)
+                log_row(log_path, row)
+                continue
             bgr = load_bgr(src)
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             h, w = rgb.shape[:2]
@@ -2265,15 +2435,46 @@ async def main() -> None:
                 row["lama_s"] = 0.0
             else:
                 inpainted = await lama.inpaint(rgb, mask, inpaint_cfg, 1536, False)
+                if VISION:
+                    for pass_i in range(2):
+                        dirty = []
+                        for block in rows:
+                            ts = block.get("typeset_box") or block["box"]
+                            if leftover_caption_ink(rgb, mask, ts) or leftover_after_lama(
+                                rgb, inpainted, ts
+                            ):
+                                dirty.append(block)
+                        if not dirty:
+                            break
+                        extra = mask.copy()
+                        for block in dirty:
+                            ts = block.get("typeset_box") or block["box"]
+                            extra = np.maximum(
+                                extra,
+                                overlay_erase_mask(rgb, ts, str(block.get("kind") or "")),
+                            )
+                            if pass_i >= 1:
+                                x, y, bw, bh = [int(v) for v in ts[:4]]
+                                hh, ww = extra.shape[:2]
+                                x0, y0 = max(0, x - 14), max(0, y - 14)
+                                x1, y1 = min(ww, x + bw + 14), min(hh, y + bh + 14)
+                                extra[y0:y1, x0:x1] = 255
+                        extra = expand_mask(extra, 8)
+                        extra = strip_skin_from_mask(rgb, extra)
+                        inpainted = await lama.inpaint(rgb, extra, inpaint_cfg, 1536, False)
+                        mask = extra
+                        row["lama_retry"] = pass_i + 1
                 row["lama_s"] = round(time.perf_counter() - t0, 3)
             skipped_incomplete = []
-            if not VISION:
+            if canvas is None:
                 for block in rows:
                     ts = block.get("typeset_box") or block["box"]
-                    if leftover_caption_ink(rgb, mask, ts):
-                        # Mode A: put original pixels back. Mode B: never paste lettered
-                        # Chinese onto the clean plate — just skip typesetting.
-                        if canvas is None:
+                    mask_miss = leftover_caption_ink(rgb, mask, ts)
+                    lama_left = leftover_after_lama(rgb, inpainted, ts)
+                    if should_skip_incomplete(
+                        vision=VISION, mask_miss=mask_miss, lama_left=lama_left
+                    ):
+                        if not VISION:
                             restore_box(inpainted, rgb, ts, pad=14)
                         skipped_incomplete.append(block["text"])
             row["skip_incomplete"] = skipped_incomplete
@@ -2460,6 +2661,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Locate+translate with Gemini 3.7 Flash (Google AI Studio first, ZenMux fallback).",
     )
+    ap.add_argument(
+        "--prefilter",
+        action="store_true",
+        help="Local CTD: copy images with no caption, only send lettered ones to Gemini.",
+    )
     ap.add_argument("--regression", action="store_true", help="Run experiments/nsfw_local/regression_set.txt")
     ap.add_argument("--gold", action="store_true", help="Run locked gold_set.json across three series")
     ns = ap.parse_args()
@@ -2507,6 +2713,7 @@ if __name__ == "__main__":
         NAMES_PATH = Path(ns.names)
     CLEAN = Path(ns.clean) if ns.clean else None
     VISION = bool(ns.vision)
+    PREFILTER = bool(ns.prefilter)
     if not ns.gold and (not ns.src or not ns.dst):
         ap.error("provide --src and --dst (or --gold with gold_set.json)")
     asyncio.run(main())

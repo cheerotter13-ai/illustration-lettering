@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import ast
 import base64
+import hashlib
 import json
 import os
 import re
@@ -29,13 +30,14 @@ except Exception:
     pass
 KEY_FILE = HERE / ".gemini_ai_studio_key"
 
-PROMPT = """You are locating every written Chinese string on an illustration / comic page.
+PROMPT = """You are locating every caption / overlay / SFX lettered onto an illustration or comic page.
 Return ONLY a JSON array, no markdown. Each element:
-{"text":"<exact Chinese as written>","type":"bubble|overlay|sfx","box":[ymin,xmin,ymax,xmax]}
+{"text":"<exact text as written>","type":"bubble|overlay|sfx","box":[ymin,xmin,ymax,xmax]}
 - box is normalized 0-1000: top, left, bottom, right of that text (not the whole page).
-- Include short SFX (嗯？ 是...... 住手 呜呜 颤抖 哒哒) and every overlay line.
+- Include Chinese overlays, short SFX (嗯？ 是...... 住手 呜呜 颤抖 哒哒), and already-English timestamps/titles lettered on the art (e.g. "2 hours later").
 - Do not merge two speakers into one item.
 - Do not invent text that is not visible.
+- Skip in-world signage that is part of the scene (neon shop signs, posters on walls), not a caption.
 """
 
 # Printed in batch logs; real route is google-ai-studio then zenmux.
@@ -228,9 +230,49 @@ def _items_from_parsed(got: list, img_w: int, img_h: int) -> list[dict]:
     return items
 
 
+def _locate_cache_path(path: Path) -> Path:
+    st = path.stat()
+    key = hashlib.sha1(
+        f"{path.resolve()}|{st.st_size}|{int(st.st_mtime)}".encode("utf-8")
+    ).hexdigest()
+    d = Path(
+        os.environ.get("LETTER_LOCATE_CACHE")
+        or str(Path(__file__).resolve().parent / "logs" / "locate_cache")
+    )
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{key}.json"
+
+
 def locate(path: Path, img_w: int, img_h: int) -> list[dict]:
+    cache = _locate_cache_path(path)
+    if cache.exists():
+        data = json.loads(cache.read_text(encoding="utf-8"))
+        items = []
+        for it in data.get("items") or []:
+            box = it.get("box")
+            if not box:
+                continue
+            items.append(
+                {
+                    "text": it.get("text") or "",
+                    "box": tuple(int(v) for v in box[:4]),
+                    "kind": str(it.get("kind") or "overlay"),
+                    "fg": None,
+                    "bg": None,
+                }
+            )
+        print(f"vision_locate cached {path.name} n={len(items)}", flush=True)
+        return items
     b64 = base64.b64encode(Path(path).read_bytes()).decode()
     raw, via = cloud_complete(system=None, user=PROMPT, image_b64=b64, max_tokens=2500)
     print(f"vision_locate model={GOOGLE_MODEL} via={via} {path.name}", flush=True)
     got = _parse_list(raw) or []
-    return _items_from_parsed(got, img_w, img_h)
+    items = _items_from_parsed(got, img_w, img_h)
+    serial = [
+        {"text": it["text"], "box": list(it["box"]), "kind": it["kind"]} for it in items
+    ]
+    cache.write_text(
+        json.dumps({"file": path.name, "w": img_w, "h": img_h, "via": via, "items": serial}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return items

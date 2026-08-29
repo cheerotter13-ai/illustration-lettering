@@ -1,6 +1,6 @@
 # 效果图说明
 
-`*-before` / `*-lettered` 是中文原图；`*-after` / `*-mode-b` 是 v0.6 输出。
+`*-before` / `*-lettered` 是中文原图；`*-after` / `*-mode-b` 是管线输出（v0.7 主路径不变，Mode A 擦字已加厚掩膜）。
 
 | 目录 | 说明 |
 |---|---|
