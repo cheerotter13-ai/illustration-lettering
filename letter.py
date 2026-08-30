@@ -1695,6 +1695,73 @@ def expand_box_to_bubble(rgb: np.ndarray, box, img_h: int, img_w: int):
     return nx, ny, nw, nh
 
 
+def _fill_mask_holes(mask: np.ndarray) -> np.ndarray:
+    h, w = mask.shape
+    flood = mask.copy()
+    ffm = np.zeros((h + 2, w + 2), np.uint8)
+    cv2.floodFill(flood, ffm, (0, 0), 128)
+    holes = (flood != 128) & (mask == 0)
+    out = mask.copy()
+    out[holes] = 255
+    return out
+
+
+def wipe_vision_bubbles(rgb: np.ndarray, items: list[dict]) -> tuple[np.ndarray, np.ndarray]:
+    """Paint paper color over glyphs inside VL speech bubbles. Keep outlines. No LaMa."""
+    h, w = rgb.shape[:2]
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    chroma = rgb.max(axis=2) - rgb.min(axis=2)
+    paper = ((gray >= 198) & (chroma < 55)).astype(np.uint8) * 255
+    cavity = np.zeros((h, w), np.uint8)
+    for it in items:
+        box = it.get("box")
+        if not box:
+            continue
+        kind = str(it.get("kind") or "")
+        if not (kind == "bubble" or is_speech_bubble(rgb, box, h, w)):
+            continue
+        x, y, bw, bh = [int(v) for v in box[:4]]
+        nx, ny, nw, nh = expand_box_to_bubble(rgb, box, h, w)
+        blob = np.zeros((h, w), np.uint8)
+        blob[ny : ny + nh, nx : nx + nw] = paper[ny : ny + nh, nx : nx + nw]
+        y0, y1 = max(0, y), min(h, y + bh)
+        x0, x1 = max(0, x), min(w, x + bw)
+        blob[y0:y1, x0:x1] = np.maximum(blob[y0:y1, x0:x1], paper[y0:y1, x0:x1])
+        filled = _fill_mask_holes(blob)
+        num, labels, stats, _ = cv2.connectedComponentsWithStats((filled > 0).astype(np.uint8), 8)
+        best_i, best_a = 0, 0
+        for i in range(1, num):
+            lx = int(stats[i, cv2.CC_STAT_LEFT])
+            ly = int(stats[i, cv2.CC_STAT_TOP])
+            lw = int(stats[i, cv2.CC_STAT_WIDTH])
+            lh = int(stats[i, cv2.CC_STAT_HEIGHT])
+            ix = max(0, min(x + bw, lx + lw) - max(x, lx))
+            iy = max(0, min(y + bh, ly + lh) - max(y, ly))
+            a = ix * iy
+            if a > best_a:
+                best_a, best_i = a, i
+        if best_i:
+            cavity = np.maximum(cavity, (labels == best_i).astype(np.uint8) * 255)
+    if int(np.count_nonzero(cavity)) < 80:
+        return rgb, cavity
+    kern = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    rim = cv2.dilate(cavity, kern) - cv2.erode(cavity, kern)
+    outline = cv2.dilate(
+        cv2.bitwise_and(rim, (gray < 90).astype(np.uint8) * 255),
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
+    )
+    wipe = (cavity > 0) & (outline == 0)
+    pale = (paper > 0) & (cavity > 0)
+    fill = (
+        np.median(rgb[pale], axis=0).astype(np.uint8)
+        if int(np.count_nonzero(pale)) >= 30
+        else np.array([248, 248, 248], np.uint8)
+    )
+    out = rgb.copy()
+    out[wipe] = fill
+    return out, cavity
+
+
 def is_speech_bubble(rgb: np.ndarray, box, img_h: int, img_w: int) -> bool:
     if is_white_sticker(rgb, box, img_h, img_w):
         return False
@@ -2543,37 +2610,55 @@ async def main() -> None:
                 inpainted = canvas
                 row["lama_s"] = 0.0
             else:
-                inpainted = await lama.inpaint(rgb, mask, inpaint_cfg, 1536, False)
+                rgb_work = rgb
+                rest = mask
                 if VISION:
-                    for pass_i in range(2):
-                        dirty = []
-                        for block in rows:
-                            ts = block.get("typeset_box") or block["box"]
-                            if leftover_caption_ink(rgb, mask, ts) or leftover_after_lama(
-                                rgb, inpainted, ts
-                            ):
-                                dirty.append(block)
-                        if not dirty:
-                            break
-                        extra = mask.copy()
-                        for block in dirty:
-                            ts = block.get("typeset_box") or block["box"]
-                            extra = np.maximum(
-                                extra,
-                                overlay_erase_mask(rgb, ts, str(block.get("kind") or "")),
+                    rgb_work, bub = wipe_vision_bubbles(rgb, rows + items)
+                    if int(np.count_nonzero(bub)) >= 80:
+                        rest = cv2.bitwise_and(mask, cv2.bitwise_not(bub))
+                        row["bubble_wipe_px"] = int(np.count_nonzero(bub))
+                if lama is None or int(np.count_nonzero(rest)) < 80:
+                    inpainted = rgb_work
+                    row["lama_s"] = 0.0
+                    if canvas is None:
+                        row["mode"] = "bubble_wipe" if row.get("bubble_wipe_px") else "no_inpaint"
+                else:
+                    inpainted = await lama.inpaint(rgb_work, rest, inpaint_cfg, 1536, False)
+                    if VISION:
+                        for pass_i in range(2):
+                            dirty = []
+                            for block in rows:
+                                ts = block.get("typeset_box") or block["box"]
+                                kind = str(block.get("kind") or "")
+                                if kind == "bubble":
+                                    continue
+                                if leftover_caption_ink(rgb, rest, ts) or leftover_after_lama(
+                                    rgb, inpainted, ts
+                                ):
+                                    dirty.append(block)
+                            if not dirty:
+                                break
+                            extra = rest.copy()
+                            for block in dirty:
+                                ts = block.get("typeset_box") or block["box"]
+                                extra = np.maximum(
+                                    extra,
+                                    overlay_erase_mask(rgb, ts, str(block.get("kind") or "")),
+                                )
+                                if pass_i >= 1:
+                                    x, y, bw, bh = [int(v) for v in ts[:4]]
+                                    hh, ww = extra.shape[:2]
+                                    x0, y0 = max(0, x - 14), max(0, y - 14)
+                                    x1, y1 = min(ww, x + bw + 14), min(hh, y + bh + 14)
+                                    extra[y0:y1, x0:x1] = 255
+                            extra = expand_mask(extra, 8)
+                            extra = strip_skin_from_mask(rgb, extra)
+                            inpainted = await lama.inpaint(
+                                rgb_work, extra, inpaint_cfg, 1536, False
                             )
-                            if pass_i >= 1:
-                                x, y, bw, bh = [int(v) for v in ts[:4]]
-                                hh, ww = extra.shape[:2]
-                                x0, y0 = max(0, x - 14), max(0, y - 14)
-                                x1, y1 = min(ww, x + bw + 14), min(hh, y + bh + 14)
-                                extra[y0:y1, x0:x1] = 255
-                        extra = expand_mask(extra, 8)
-                        extra = strip_skin_from_mask(rgb, extra)
-                        inpainted = await lama.inpaint(rgb, extra, inpaint_cfg, 1536, False)
-                        mask = extra
-                        row["lama_retry"] = pass_i + 1
-                row["lama_s"] = round(time.perf_counter() - t0, 3)
+                            rest = extra
+                            row["lama_retry"] = pass_i + 1
+                    row["lama_s"] = round(time.perf_counter() - t0, 3)
             skipped_incomplete = []
             if canvas is None:
                 for block in rows:

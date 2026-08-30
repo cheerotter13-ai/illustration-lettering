@@ -23,6 +23,18 @@
 
 **一句话**：Gemini 只负责看图定位；翻译默认本机 Qwen 无审查；擦字和写字都在你电脑上。
 
+### 订阅额度能不能代替 API 花钱
+
+**不能把 Gemini App / Grok Heavy 的聊天额度直接灌进这个脚本。** CLI 走的是 API key（`generativelanguage.googleapis.com`），和网页登录不是同一本账。
+
+| 你有的 | 实际作用 |
+|---|---|
+| **Google AI Pro** | 同一 Google 账号在 [AI Studio](https://aistudio.google.com) 里的日配额比免费档高。用完后同一把 `GEMINI_API_KEY` 会改成 Cloud Billing **按次付费**。 |
+| **Grok Heavy** | 只覆盖 grok.com / Grok Build。**不含** xAI API credit。`api.x.ai` 另计。 |
+| **定位磁盘缓存** | 源图路径+大小+mtime 不变则**不再传图**。这是省钱的主开关。翻译默认本机 Qwen，不烧定位 token。 |
+
+不要用脚本登录 Gemini/Grok 网页去刷订阅。小批量可以在 Grok Build 对话里看图出框（烧 Heavy 聊天额度），不适合 100+ 张无人值守。
+
 ---
 
 ## 效果参考

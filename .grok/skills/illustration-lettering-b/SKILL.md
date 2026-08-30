@@ -33,15 +33,15 @@ python3 letter_b.py --src LETTERED --clean CLEAN --dst OUT --lang en --retransla
 
 Translation default is local Ollama `qwen3.8:27b-uncensored`, then Gemini text if Ollama is down. Force with `--translate local` or `--translate gemini`.
 
-Locate uses Gemini (image). Disk cache `logs/locate_cache/` (or `LETTER_LOCATE_CACHE`) keyed by path+size+mtime. Do not re-upload unchanged files.
+Locate uses Gemini **API** (`GEMINI_API_KEY` / `ZENMUX_API_KEY`), not Gemini App chat and not Grok Heavy. Google AI Pro only raises AI Studio daily quota for that same account; it is not unlimited. Cache `logs/locate_cache/` (or `LETTER_LOCATE_CACHE`) by path+size+mtime — unchanged files are not re-uploaded.
 
 ## Agent steps
 
 1. Confirm lettered + clean folders exist; spot-check one filename exists in both and dimensions match.
-2. Confirm a Gemini/ZenMux key is set. Do not print secret values.
-3. `python3 -c "import cv2,numpy,PIL"` ; if missing, `pip install -r requirements-b.txt`.
-4. Run `letter_b.py`. Prefer `--only` for a smoke file first.
-5. Read `SUMMARY` and `logs/qingge_<lang>.jsonl`. Report failed files. Do not invent missing plates.
+2. Confirm a Gemini/ZenMux key is set. Do not print secret values. Tell the user locate hits cache when files are unchanged; Heavy subscription does not pay xAI API.
+3. `python3 -c "import cv2,numpy,PIL"` ; if missing, `pip install -r requirements-b.txt` (no PyTorch).
+4. Smoke one file: `python3 letter_b.py --src ... --clean ... --dst ... --lang en --only one.jpg`
+5. If that SUMMARY is ok, run the rest. Read `logs/qingge_<lang>.jsonl`. Report failed files. Do not invent missing plates.
 
 ## Do not
 
