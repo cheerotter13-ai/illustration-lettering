@@ -1,13 +1,57 @@
-# illustration-lettering v0.8
+# illustration-lettering v0.10
 
-插画 / 漫画 **中文配文 → 英文（或日文）嵌字** 管线。把带中文字幕的图丢进一个文件夹，即可批量出译文字幕图。
+插画 / 漫画 **中文配文 → 英文（或日文）嵌字**。克隆仓库后双击启动脚本，浏览器会打开本机网页；填上你的模型接口，选文件夹即可批量出图。
 
-- **Mode B（推荐）**：你提供「无字底图」时，不跑擦字，只定位+翻译+把字打在底图上。脸和身体保持原像素。
-- **Mode A**：只有带字原图时，云端 Vision 出框 → 本地 LaMa 擦中文 → 再嵌翻译。v0.7 加厚 overlay/SFX 掩膜并二次补擦，插画叠字已作为主路径锁定。
+![本机网页](examples/web-ui.png)
+
+页面分三步：**接上模型 → 选文件夹 → 开始嵌字**。只监听 `127.0.0.1`，图片的擦字和写字都在你电脑上完成。
+
+| 模式 | 你需要准备什么 | 没 GPU / 没 LaMa 时 |
+|---|---|---|
+| **Mode B（推荐）** | 带中文的图 + **同名无字底图** | **照常用**。Mac、笔记本、纯 CPU 都走这条。 |
+| **Mode A** | 只有带字原图；本机还要 NVIDIA CUDA + [manga-image-translator](https://github.com/zyddnys/manga-image-translator)（LaMa） | 页面会自动禁用 Mode A，并写明原因。请改用 Mode B，或自己装好 MIT 后再填它的根目录。 |
+
+软件**不会**把 CUDA、torch、LaMa 权重打进安装包。没有这些，网页照样能开，只是不能擦原图上的字。
 
 效果对照见 [`examples/`](examples/)。
 
-**Mac / 无 NVIDIA：** 只用 Mode B。入口 `letter_b.py`（或 `letter.py --mode-b --clean …`），依赖 `requirements-b.txt`，不加载 CUDA/LaMa。Grok skill：`.grok/skills/illustration-lettering-b/`。
+## 怎么打开网页
+
+**Windows：** 双击 `start.bat`  
+**Mac：** 第一次请右键 `start.command` → 打开（或终端 `chmod +x start.command` 后再双击）
+
+脚本会安装 `requirements-b.txt` 并启动 `http://127.0.0.1:8765/`。需要已安装 [Python 3.10+](https://www.python.org/downloads/)（Windows 安装时勾选 Add to PATH）。
+
+也可以手动：
+
+```bat
+python -m pip install -r requirements-b.txt
+python web_app.py
+```
+
+### 页面里填什么
+
+1. **Base URL / API Key / 模型名**：任意 OpenAI 兼容接口（官方、中转、或本机 Ollama `http://127.0.0.1:11434/v1`）。定位和翻译都走这一套。本地模型必须带**视觉**才能找框。
+2. 把资源管理器 / Finder 里的文件夹路径粘进页面（浏览器不能直接弹出系统选文件夹窗口）。失焦后会显示里面有多少张图。
+3. Mode B 还要无字底图目录（文件名与带字图相同）。
+4. 密钥只存在本机用户目录：`%APPDATA%\illustration-lettering\config.json`（Mac：`~/Library/Application Support/illustration-lettering/`），不进 git。
+
+命令行仍可用 `letter.py` / `letter_b.py`。以前的 PyInstaller exe 已不再维护。
+
+## Mode A 前置条件（缺一不可）
+
+Mode A 是「只有带字原图、要在本机把中文擦掉再嵌译文」。网页**不会**帮你安装 GPU 或擦字模型。要用 Mode A，下面三项必须已经在你电脑上就绪：
+
+1. **NVIDIA GPU + CUDA 版 PyTorch**  
+   当前用来跑任务的 Python 里 `import torch` 且 `torch.cuda.is_available()` 为 True。可用 ComfyUI 自带的解释器，并用环境变量 `LETTER_PYTHON` 指过去。
+2. **本机已克隆并能跑 [manga-image-translator](https://github.com/zyddnys/manga-image-translator)**  
+   在网页「MIT 根目录」里填这个仓库路径（例如 `D:\manga-image-translator`）。
+3. **LaMa 擦字权重已下载**  
+   按 MIT 文档放到它的 `models/`（LaMa / ComicTextDetector / 48px OCR）。没有这些权重，Mode A 会在擦字步骤失败。
+
+**缺任何一项：请用 Mode B**（自备同名无字底图）。Mac、没有独显、不想装 MIT 的用户都走 Mode B。页面启动时会探测 CUDA 和 MIT 路径；不满足时 Mode A 会禁用，并显示原因。
+
+叠字贴在皮肤/衣服上时，即使前置条件齐全，LaMa 仍可能擦糊。那种图优先 Mode B。
 
 ---
 
@@ -83,11 +127,15 @@
 
 ### 0. 你需要的环境
 
-- Windows + NVIDIA GPU（Mode A 擦字用 CUDA LaMa）
-- 已经能跑 [manga-image-translator](https://github.com/zyddnys/manga-image-translator) 的 Python（本机常用 ComfyUI 自带解释器）
-- 本机已下载 MIT 的 **LaMa / ComicTextDetector / 48px OCR** 权重（放在 MIT 仓库的 `models/` 下，按其文档来）
+**所有人（Mode B）：** Python 3.10+，然后双击 `start.bat` / `start.command`。不需要 GPU。
 
-没有 GPU 时，仍可跑 **Mode B**（不擦字）。
+**仅当要用 Mode A 擦字时，另加前置条件：**
+
+- Windows + **NVIDIA CUDA**
+- 已经能跑 [manga-image-translator](https://github.com/zyddnys/manga-image-translator) 的 Python（可用 ComfyUI 自带解释器，设 `LETTER_PYTHON`）
+- MIT 的 **LaMa / ComicTextDetector / 48px OCR** 权重已在 MIT 仓库 `models/` 下
+
+不满足就只开网页、选 Mode B。
 
 ### 1. 克隆
 
@@ -108,7 +156,10 @@ cd illustration-lettering
 优先用你跑 ComfyUI / MIT 的那个 `python.exe`，不要用系统 Python。
 
 ```bat
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-b.txt
+python web_app.py
+# Mode A 擦字还要能在 LETTER_PYTHON / Comfy 解释器里 import torch 且 CUDA 可用
+# python -m pip install -r requirements.txt
 ```
 
 确认能 `import torch` 且 `torch.cuda.is_available()` 为 True（Mode A）。

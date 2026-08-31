@@ -3,3 +3,5 @@ opencv-python-headless
 numpy
 Pillow
 python-dotenv
+fastapi
+uvicorn[standard]

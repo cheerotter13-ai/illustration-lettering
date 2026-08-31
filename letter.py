@@ -1,6 +1,7 @@
-"""Illustration overlay/bubble translator + typesetter (v0.8).
+"""Illustration overlay/bubble translator + typesetter (v0.9).
 
-Locate with Gemini. Translate with local Qwen, Gemini if Ollama is down.
+Locate + translate via user OpenAI-compat endpoint when set.
+Dev fallback: Gemini locate, local Qwen translate.
 """
 from __future__ import annotations
 
@@ -21,11 +22,23 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-HERE = Path(__file__).resolve().parent
+try:
+    from user_config import apply_to_env, resource_dir
+
+    HERE = resource_dir()
+    apply_to_env()
+except Exception:
+    HERE = Path(__file__).resolve().parent
 try:
     from dotenv import load_dotenv
 
     load_dotenv(HERE / ".env")
+except Exception:
+    pass
+try:
+    from user_config import apply_to_env as _apply_cfg
+
+    _apply_cfg()
 except Exception:
     pass
 SRC = Path(os.environ.get("LETTER_SRC", str(HERE / "input")))
@@ -1394,6 +1407,11 @@ def ollama_translate(lines: list[str]) -> tuple[list[str], float]:
     user = json.dumps(lines, ensure_ascii=False)
     mode = (TRANSLATE or "auto").lower()
     last_err = None
+    if mode == "openai":
+        raw, via = _gemini_complete(system, user)
+        out = _parse_translation(raw, len(lines))
+        print(f"translate via={via} n={len(lines)}", flush=True)
+        return out, time.perf_counter() - t0
     if mode in ("auto", "local") and not OLLAMA_SKIP:
         try:
             raw = _ollama_complete(system, user)
@@ -2187,7 +2205,11 @@ async def main() -> None:
     from vision_locate import MODEL as _VM
     from vision_locate import google_api_key, zenmux_api_key
 
-    print(f"vision_model {_VM} google_key={bool(google_api_key())} zenmux_key={bool(zenmux_api_key())}", flush=True)
+    print(
+        f"vision_model {_VM} google_key={bool(google_api_key())} zenmux_key={bool(zenmux_api_key())} "
+        f"user_endpoint={bool((os.environ.get('LETTER_OPENAI_BASE') or '').strip())}",
+        flush=True,
+    )
     warm_s = 0.0
     global OLLAMA_SKIP
     if TRANSLATE in ("auto", "local"):
@@ -2246,6 +2268,10 @@ async def main() -> None:
         "ollama_warmup_s": round(warm_s, 2),
     }
     for i, job in enumerate(jobs, 1):
+        stop = (os.environ.get("LETTER_STOP_FILE") or "").strip()
+        if stop and Path(stop).exists():
+            print(f"stopped_by_user at {i}/{len(jobs)}", flush=True)
+            break
         src = job["src"]
         dst = job["dst"]
         cache_key = job["key"]
@@ -2867,9 +2893,9 @@ if __name__ == "__main__":
     )
     ap.add_argument(
         "--translate",
-        choices=("auto", "local", "gemini"),
+        choices=("auto", "local", "gemini", "openai"),
         default="auto",
-        help="Caption translation: local Qwen (default auto), Gemini if Ollama is down.",
+        help="Caption translation: openai=user endpoint; local Qwen; gemini/auto fallback.",
     )
     ap.add_argument(
         "--mode-b",

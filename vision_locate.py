@@ -1,6 +1,7 @@
 """Cloud VL locate: boxes + Chinese text. No image generation.
 
-Provider order: Google AI Studio Gemini 3.7 Flash, then ZenMux same model.
+User OpenAI-compat endpoint (LETTER_OPENAI_*) wins when set.
+Dev fallback: Google AI Studio, then ZenMux, then MuskAPI.
 """
 from __future__ import annotations
 
@@ -15,12 +16,14 @@ import urllib.request
 from pathlib import Path
 
 ZENMUX = "https://zenmux.ai/api/v1/chat/completions"
+MUSKAPI = "https://api.muskapi.cc/v1/chat/completions"
+MUSKAPI_MODEL = os.environ.get("MUSKAPI_MODEL", "gemini-3.7-flash")
+GOOGLE_MODEL = os.environ.get("LETTER_GEMINI_MODEL", "gemini-3.7-flash")
 GOOGLE_GEN = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-3.7-flash:generateContent"
+    f"{GOOGLE_MODEL}:generateContent"
 )
-ZENMUX_MODEL = os.environ.get("VISION_MODEL", "google/gemini-3.7-flash")
-GOOGLE_MODEL = "gemini-3.7-flash"
+ZENMUX_MODEL = os.environ.get("VISION_MODEL", f"google/{GOOGLE_MODEL}")
 HERE = Path(__file__).resolve().parent
 try:
     from dotenv import load_dotenv
@@ -41,7 +44,7 @@ Return ONLY a JSON array, no markdown. Each element:
 """
 
 # Printed in batch logs; real route is google-ai-studio then zenmux.
-MODEL = os.environ.get("VISION_MODEL", "google/gemini-3.7-flash")
+MODEL = os.environ.get("VISION_MODEL", f"google/{GOOGLE_MODEL}")
 
 
 def google_api_key() -> str:
@@ -56,6 +59,51 @@ def google_api_key() -> str:
 
 def zenmux_api_key() -> str:
     return (os.environ.get("ZENMUX_API_KEY") or "").strip()
+
+
+def muskapi_api_key() -> str:
+    return (os.environ.get("MUSKAPI_KEY") or "").strip()
+
+
+def _openai_compat_complete(
+    url: str,
+    key: str,
+    model: str,
+    system: str | None,
+    user: str,
+    image_b64: str | None,
+    max_tokens: int,
+) -> str:
+    content: list[dict] = [{"type": "text", "text": user}]
+    if image_b64:
+        content.append(
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + image_b64}}
+        )
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": content if image_b64 else user})
+    body = {
+        "model": model,
+        "temperature": 0.1,
+        "max_tokens": max_tokens,
+        "messages": messages,
+    }
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers=headers,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", "replace")[:800]
+        raise RuntimeError(f"compat HTTP {e.code}: {err}") from e
+    return (payload.get("choices") or [{}])[0].get("message", {}).get("content") or ""
 
 
 def _parse_list(raw: str) -> list | None:
@@ -164,6 +212,24 @@ _google_skip = False
 _google_overload = 0
 
 
+def _user_compat() -> tuple[str, str, str]:
+    try:
+        from user_config import apply_to_env, user_endpoint
+
+        apply_to_env()
+        return user_endpoint()
+    except Exception:
+        base = (os.environ.get("LETTER_OPENAI_BASE") or "").strip().rstrip("/")
+        key = (os.environ.get("LETTER_OPENAI_KEY") or "").strip()
+        model = (os.environ.get("LETTER_OPENAI_MODEL") or "").strip()
+        if base and not base.endswith("/chat/completions"):
+            if base.endswith("/v1"):
+                base = base + "/chat/completions"
+            else:
+                base = base + "/v1/chat/completions"
+        return base, key, model
+
+
 def cloud_complete(
     *,
     system: str | None,
@@ -171,9 +237,18 @@ def cloud_complete(
     image_b64: str | None = None,
     max_tokens: int = 2500,
 ) -> tuple[str, str]:
-    """Gemini 3.7 Flash: Google AI Studio first, ZenMux fallback. Returns (text, via)."""
+    """User OpenAI-compat first; else Google → ZenMux → MuskAPI."""
     global _google_skip, _google_overload
     last = None
+    url, key, model = _user_compat()
+    if url and model:
+        try:
+            text = _openai_compat_complete(
+                url, key, model, system, user, image_b64, max_tokens
+            )
+            return text, "openai-compat"
+        except Exception as e:
+            raise RuntimeError(f"user endpoint failed: {e}") from e
     if (not _google_skip) and google_api_key():
         try:
             text = _google_complete(system, user, image_b64, max_tokens)
@@ -194,6 +269,21 @@ def cloud_complete(
         except Exception as e:
             last = e
             print(f"cloud_complete zenmux fail: {e}", flush=True)
+    if muskapi_api_key():
+        try:
+            text = _openai_compat_complete(
+                MUSKAPI,
+                muskapi_api_key(),
+                MUSKAPI_MODEL,
+                system,
+                user,
+                image_b64,
+                max_tokens,
+            )
+            return text, "muskapi"
+        except Exception as e:
+            last = e
+            print(f"cloud_complete muskapi fail: {e}", flush=True)
     raise RuntimeError(f"cloud_complete failed: {last}")
 
 
@@ -232,8 +322,10 @@ def _items_from_parsed(got: list, img_w: int, img_h: int) -> list[dict]:
 
 def _locate_cache_path(path: Path) -> Path:
     st = path.stat()
+    url, _key, model = _user_compat()
+    loc_id = f"{url}|{model or GOOGLE_MODEL}"
     key = hashlib.sha1(
-        f"{path.resolve()}|{st.st_size}|{int(st.st_mtime)}".encode("utf-8")
+        f"{path.resolve()}|{st.st_size}|{int(st.st_mtime)}|{loc_id}".encode("utf-8")
     ).hexdigest()
     d = Path(
         os.environ.get("LETTER_LOCATE_CACHE")
@@ -265,7 +357,8 @@ def locate(path: Path, img_w: int, img_h: int) -> list[dict]:
         return items
     b64 = base64.b64encode(Path(path).read_bytes()).decode()
     raw, via = cloud_complete(system=None, user=PROMPT, image_b64=b64, max_tokens=2500)
-    print(f"vision_locate model={GOOGLE_MODEL} via={via} {path.name}", flush=True)
+    url, _k, umodel = _user_compat()
+    print(f"vision_locate model={umodel or GOOGLE_MODEL} via={via} {path.name}", flush=True)
     got = _parse_list(raw) or []
     items = _items_from_parsed(got, img_w, img_h)
     serial = [

@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>插画嵌字</title>
+  <style>
+    :root {
+      --ink: #1c1915;
+      --paper: #f4efe6;
+      --card: #fffdf8;
+      --line: #ddd4c4;
+      --muted: #6f675c;
+      --accent: #b42318;
+      --accent-2: #1f4d3a;
+      --ok: #1f4d3a;
+      --warn: #8a5a12;
+      --shadow: 0 18px 40px rgba(28, 25, 21, 0.08);
+      --mono: "Cascadia Mono", "SF Mono", ui-monospace, Consolas, monospace;
+      --sans: "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); }
+    body { min-height: 100vh; }
+    header {
+      padding: 28px 40px 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 16px;
+    }
+    header h1 { font-size: 28px; font-weight: 650; letter-spacing: 0.02em; margin: 0; }
+    header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+    .badge {
+      font-size: 12px; color: var(--muted); border: 1px solid var(--line);
+      padding: 4px 10px; border-radius: 999px; background: var(--card);
+    }
+    main {
+      display: grid;
+      grid-template-columns: 380px 1fr;
+      gap: 24px;
+      padding: 16px 40px 48px;
+      align-items: start;
+    }
+    @media (max-width: 960px) { main { grid-template-columns: 1fr; padding: 12px 16px 32px; } }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 20px 20px 16px;
+    }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin: 0 0 14px; }
+    label { display: block; font-size: 13px; margin: 12px 0 6px; color: var(--ink); }
+    input, select, textarea {
+      width: 100%; padding: 10px 12px; border-radius: 10px;
+      border: 1px solid var(--line); background: #fff; font: inherit; color: inherit;
+    }
+    input:focus, select:focus { outline: 2px solid #1f4d3a33; border-color: var(--accent-2); }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; line-height: 1.45; }
+    .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    button {
+      border: 0; border-radius: 999px; padding: 10px 16px; font: inherit; cursor: pointer;
+      background: var(--ink); color: var(--paper);
+    }
+    button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+    button.danger { background: var(--accent); color: #fff; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .status { font-size: 13px; margin-top: 12px; min-height: 1.4em; }
+    .status.ok { color: var(--ok); }
+    .status.bad { color: var(--accent); }
+    .steps { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 40px 8px; }
+    .steps span {
+      font-size: 12px; padding: 6px 10px; border-radius: 999px;
+      background: #ece4d6; color: var(--muted);
+    }
+    .steps span.on { background: var(--ink); color: var(--paper); }
+    .log {
+      height: 220px; overflow: auto; background: #1c1915; color: #e8dfd0;
+      font-family: var(--mono); font-size: 12px; line-height: 1.5;
+      border-radius: 12px; padding: 12px; white-space: pre-wrap;
+    }
+    .gallery {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 10px; margin-top: 14px;
+    }
+    .gallery figure {
+      margin: 0; background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+    }
+    .gallery img { width: 100%; height: 140px; object-fit: cover; display: block; background: #eee; }
+    .gallery figcaption { font-size: 11px; padding: 6px 8px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .folder-meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .mode-note { background: #f7ecd9; border-radius: 10px; padding: 10px 12px; font-size: 12px; color: var(--warn); margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>插画嵌字</h1>
+      <p>本机网页。模型由你指定，图片不离开这台电脑上的擦字与写字步骤。</p>
+    </div>
+    <span class="badge" id="ver">v0.10</span>
+  </header>
+  <div class="steps">
+    <span id="s1">1. 接上模型</span>
+    <span id="s2">2. 选文件夹</span>
+    <span id="s3">3. 开始嵌字</span>
+  </div>
+  <main>
+    <section class="card">
+      <h2>模型</h2>
+      <label>预设</label>
+      <select id="preset">
+        <option value="">自定义 / 中转</option>
+        <option value="https://api.openai.com/v1">OpenAI</option>
+        <option value="https://openrouter.ai/api/v1">OpenRouter</option>
+        <option value="http://127.0.0.1:11434/v1">Ollama 本机</option>
+        <option value="http://127.0.0.1:1234/v1">LM Studio / vLLM</option>
+      </select>
+      <label>Base URL</label>
+      <input id="base_url" placeholder="https://api.example.com/v1 或 http://127.0.0.1:11434/v1" />
+      <label>API Key（本地服务可留空）</label>
+      <input id="api_key" type="password" autocomplete="off" />
+      <label>模型名</label>
+      <input id="model" placeholder="必须带视觉才能定位，例如 gemini-3.7-flash / llava" />
+      <p class="hint">任意 OpenAI 兼容接口。定位和翻译都走这一套。纯文本模型读不出图上的字。</p>
+      <div class="btns">
+        <button type="button" class="ghost" id="btn-test">测试连接</button>
+        <button type="button" class="ghost" id="btn-save">保存设置</button>
+      </div>
+      <div class="status" id="model-status"></div>
+    </section>
+
+    <section>
+      <div class="card" style="margin-bottom:16px">
+        <h2>这一批图</h2>
+        <div class="row">
+          <div>
+            <label>模式</label>
+            <select id="mode">
+              <option value="b">Mode B · 有无字底图（推荐）</option>
+              <option value="a">Mode A · 只有带字图，本机擦字</option>
+            </select>
+          </div>
+          <div>
+            <label>译文语言</label>
+            <select id="lang">
+              <option value="en">英语</option>
+              <option value="ja">日语</option>
+            </select>
+          </div>
+        </div>
+        <label>带中文的图所在文件夹</label>
+        <input id="src" placeholder="例如 D:\work\晴歌 或 /Users/me/pages" />
+        <div class="folder-meta" id="src-meta"></div>
+        <div id="clean-wrap">
+          <label>无字底图文件夹（文件名与带字图相同）</label>
+          <input id="clean" placeholder="Mode B 必填" />
+          <div class="folder-meta" id="clean-meta"></div>
+        </div>
+        <label>输出文件夹</label>
+        <input id="dst" placeholder="新建也可以，会自动创建" />
+        <div id="mit-wrap" hidden>
+          <label>manga-image-translator 根目录（仅 Mode A）</label>
+          <input id="mit_root" />
+          <p class="mode-note" id="mode-note">Mode A 需要本机 NVIDIA CUDA 和 manga-image-translator（LaMa）。没有它们时请用 Mode B。</p>
+        </div>
+        <p class="hint">浏览器不能直接弹出系统文件夹窗口。把资源管理器里的路径粘贴进来即可。失焦后会检查里面有多少张图。</p>
+        <div class="btns">
+          <button type="button" id="btn-run">开始嵌字</button>
+          <button type="button" class="danger" id="btn-stop">停止</button>
+        </div>
+        <div class="status" id="run-status"></div>
+      </div>
+      <div class="card">
+        <h2>进度</h2>
+        <div class="log" id="log">等待开始…</div>
+        <div class="gallery" id="gallery"></div>
+      </div>
+    </section>
+  </main>
+<script>
+const $ = (id) => document.getElementById(id);
+const fields = ["base_url","api_key","model","lang","mode","src","dst","clean","mit_root"];
+
+function setStatus(el, ok, text) {
+  el.className = "status " + (ok ? "ok" : "bad");
+  el.textContent = text;
+}
+function payload() {
+  const o = {};
+  for (const k of fields) o[k] = $(k).value.trim();
+  return o;
+}
+function applyModeA(meta) {
+  const opt = $("mode").querySelector('option[value="a"]');
+  if (meta.reason) $("mode-note").textContent = meta.reason;
+  if (!meta.mode_a_ok) {
+    $("mode").value = "b";
+    opt.disabled = true;
+  } else {
+    opt.disabled = false;
+  }
+  toggleMode();
+}
+function apply(cfg) {
+  for (const k of fields) if (cfg[k] != null) $(k).value = cfg[k];
+  applyModeA(cfg);
+}
+function toggleMode() {
+  const b = $("mode").value === "b";
+  $("clean-wrap").hidden = !b;
+  $("mit-wrap").hidden = b;
+  $("s2").classList.toggle("on", $("src").value && $("dst").value);
+}
+function stepModel() {
+  const on = $("base_url").value.trim() && $("model").value.trim();
+  $("s1").classList.toggle("on", on);
+}
+
+async function checkFolder(id, metaId) {
+  const path = $(id).value.trim();
+  if (!path) { $(metaId).textContent = ""; return; }
+  const r = await fetch("/api/folder", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({path})
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $(metaId).textContent = j.detail || "路径无效"; return; }
+  $(metaId).textContent = `找到 ${j.count} 张图` + (j.sample?.length ? " · " + j.sample.slice(0,4).join(", ") : "");
+  if (j.path) $(id).value = j.path;
+  toggleMode();
+}
+
+async function refreshJob() {
+  const r = await fetch("/api/job");
+  const j = await r.json();
+  if (j.log?.length) $("log").textContent = j.log.join("\n");
+  $("log").scrollTop = $("log").scrollHeight;
+  const g = $("gallery");
+  g.innerHTML = "";
+  (j.previews || []).reverse().forEach(name => {
+    const fig = document.createElement("figure");
+    fig.innerHTML = `<img src="/api/preview/${encodeURIComponent(name)}?t=${Date.now()}" alt=""><figcaption>${name}</figcaption>`;
+    g.appendChild(fig);
+  });
+  $("s3").classList.toggle("on", j.running || j.done);
+  if (j.running) $("run-status").textContent = "正在处理… 当前图结束后才会响应停止。";
+  else if (j.error) setStatus($("run-status"), false, j.error);
+  else if (j.done) setStatus($("run-status"), true, "这一批结束。输出在你填的文件夹里。");
+  return j.running;
+}
+
+$("preset").addEventListener("change", () => {
+  if ($("preset").value) $("base_url").value = $("preset").value;
+  stepModel();
+});
+$("mode").addEventListener("change", toggleMode);
+["base_url","model"].forEach(id => $(id).addEventListener("input", stepModel));
+$("src").addEventListener("blur", () => checkFolder("src","src-meta"));
+$("clean").addEventListener("blur", () => checkFolder("clean","clean-meta"));
+$("mit_root").addEventListener("blur", async () => {
+  const r = await fetch("/api/meta?mit_root=" + encodeURIComponent($("mit_root").value.trim()));
+  applyModeA(await r.json());
+});
+
+$("btn-test").onclick = async () => {
+  const p = payload();
+  const r = await fetch("/api/test", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(p)});
+  const j = await r.json();
+  setStatus($("model-status"), j.ok, j.ok ? `连接成功（${j.via}）` : (j.error || "失败"));
+  stepModel();
+};
+$("btn-save").onclick = async () => {
+  const r = await fetch("/api/settings", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload())});
+  const j = await r.json();
+  setStatus($("model-status"), r.ok, r.ok ? "已保存到本机用户目录" : (j.detail || "保存失败"));
+};
+$("btn-run").onclick = async () => {
+  $("btn-run").disabled = true;
+  const r = await fetch("/api/run", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload())});
+  const j = await r.json().catch(() => ({}));
+  $("btn-run").disabled = false;
+  const err = typeof j.detail === "string" ? j.detail : (j.detail ? JSON.stringify(j.detail) : "无法开始");
+  if (!r.ok) { setStatus($("run-status"), false, err); return; }
+  setStatus($("run-status"), true, "已开始");
+  $("log").textContent = "";
+  poll();
+};
+$("btn-stop").onclick = () => fetch("/api/stop", {method:"POST"});
+
+let timer = null;
+async function poll() {
+  const running = await refreshJob();
+  if (running) timer = setTimeout(poll, 1200);
+}
+fetch("/api/meta").then(r => r.json()).then(m => { $("ver").textContent = "v" + m.version + " · " + m.platform; applyModeA(m); });
+fetch("/api/settings").then(r => r.json()).then(apply).then(() => { stepModel(); checkFolder("src","src-meta"); checkFolder("clean","clean-meta"); refreshJob(); });
+</script>
+</body>
+</html>
