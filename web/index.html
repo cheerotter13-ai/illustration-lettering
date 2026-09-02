@@ -92,6 +92,13 @@
     .gallery figcaption { font-size: 11px; padding: 6px 8px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .folder-meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
     .mode-note { background: #f7ecd9; border-radius: 10px; padding: 10px 12px; font-size: 12px; color: var(--warn); margin-top: 10px; }
+    .promo {
+      display: block; margin: 8px 40px 0; padding: 10px 14px; border-radius: 12px;
+      background: #1f4d3a; color: #f4efe6; text-decoration: none; font-size: 13px; line-height: 1.45;
+    }
+    .promo:hover { filter: brightness(1.08); }
+    .promo strong { font-weight: 650; }
+    @media (max-width: 960px) { .promo { margin: 8px 16px 0; } }
   </style>
 </head>
 <body>
@@ -100,8 +107,11 @@
       <h1>插画嵌字</h1>
       <p>本机网页。模型由你指定，图片不离开这台电脑上的擦字与写字步骤。</p>
     </div>
-    <span class="badge" id="ver">v0.10</span>
+    <span class="badge" id="ver">v0.11</span>
   </header>
+  <a class="promo" href="https://aizhanghao.com?from=8530" target="_blank" rel="noopener noreferrer">
+    <strong>常用 AI 产品低价代充</strong>　ChatGPT / Gemini / Codex / Grok 会员全网最低价开通。用这个邀请链接注册，优惠多多 →
+  </a>
   <div class="steps">
     <span id="s1">1. 接上模型</span>
     <span id="s2">2. 选文件夹</span>

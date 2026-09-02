@@ -2,6 +2,9 @@
 
 插画 / 漫画 **中文配文 → 英文（或日文）嵌字**。克隆仓库后双击启动脚本，浏览器会打开本机网页；填上你的模型接口，选文件夹即可批量出图。
 
+> **常用 AI 产品低价代充：** [https://aizhanghao.com?from=8530](https://aizhanghao.com?from=8530)  
+> ChatGPT、Gemini、Codex、Grok 会员全网最低价开通。**用这个邀请链接注册，优惠多多。**
+
 ![本机网页](examples/web-ui.png)
 
 页面分三步：**接上模型 → 选文件夹 → 开始嵌字**。只监听 `127.0.0.1`，图片的擦字和写字都在你电脑上完成。
@@ -13,7 +16,38 @@
 
 软件**不会**把 CUDA、torch、LaMa 权重打进安装包。没有这些，网页照样能开，只是不能擦原图上的字。
 
-效果对照见 [`examples/`](examples/)。
+效果对照见下面「奥黛塔」案例和 [`examples/`](examples/)。
+
+## 案例：奥黛塔正篇 · Mode B
+
+2026-09 用 **Mode B** 把《奥黛塔》正篇的中文叠字嵌成英文和日文：有字图 + 同名无字底图，字写在干净底板上，不跑 LaMa、不改画。定位和翻译走 Gemini 3.7 Flash。叠字 491 张 `failed=0`（英约 3.6 小时，日约 1.7 小时，日语命中定位缓存不再传图）。图一拟声只复制，不送视觉模型。
+
+成品目录（本机）：`奥黛塔/英文`、`奥黛塔/日语`（对照 `中文`）。
+
+这次一并做进仓库的改进：
+
+- 带字图和底图必须 **同名、同像素尺寸**；网页会列出缺文件 / 尺寸不对的名单，对不上不让开跑
+- 自动分类图一拟声 vs 图二叠字；拟声和完全相同的底图不烧定位
+- 双页按黑缝拆开，半页缺底图再用 image edit 去字（不是 LaMa），嵌完拼回
+- Grok Build / Antigravity 可直接调 `/illustration-lettering-pipeline`
+
+品红内心独白（中 → 英 → 日）：
+
+| 中文 | 英语 | 日语 |
+|---|---|---|
+| ![](examples/odette-mode-b/19-zh.jpg) | ![](examples/odette-mode-b/19-en.jpg) | ![](examples/odette-mode-b/19-ja.jpg) |
+
+长句旁白叠在画面上：
+
+| 中文 | 英语 | 日语 |
+|---|---|---|
+| ![](examples/odette-mode-b/11-zh.jpg) | ![](examples/odette-mode-b/11-en.jpg) | ![](examples/odette-mode-b/11-ja.jpg) |
+
+分镜叠字（哈…哈 / Haa… / はぁ）：
+
+| 中文 | 英语 | 日语 |
+|---|---|---|
+| ![](examples/odette-mode-b/stage-zh.jpg) | ![](examples/odette-mode-b/stage-en.jpg) | ![](examples/odette-mode-b/stage-ja.jpg) |
 
 ## 怎么打开网页
 
