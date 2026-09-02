@@ -158,6 +158,7 @@
           <label>无字底图文件夹（文件名与带字图相同）</label>
           <input id="clean" placeholder="Mode B 必填" />
           <div class="folder-meta" id="clean-meta"></div>
+          <div class="folder-meta" id="pair-meta"></div>
         </div>
         <label>输出文件夹</label>
         <input id="dst" placeholder="新建也可以，会自动创建" />
@@ -166,7 +167,7 @@
           <input id="mit_root" />
           <p class="mode-note" id="mode-note">Mode A 需要本机 NVIDIA CUDA 和 manga-image-translator（LaMa）。没有它们时请用 Mode B。</p>
         </div>
-        <p class="hint">浏览器不能直接弹出系统文件夹窗口。把资源管理器里的路径粘贴进来即可。失焦后会检查里面有多少张图。</p>
+        <p class="hint">浏览器不能直接弹出系统文件夹窗口。把资源管理器里的路径粘贴进来即可。Mode B 会检查带字图与底图是否同名、同尺寸；对不上会列出文件名，需要你先改文件夹。</p>
         <div class="btns">
           <button type="button" id="btn-run">开始嵌字</button>
           <button type="button" class="danger" id="btn-stop">停止</button>
@@ -219,6 +220,42 @@ function stepModel() {
   $("s1").classList.toggle("on", on);
 }
 
+function fmtList(arr, n) {
+  if (!arr || !arr.length) return "";
+  const names = arr.slice(0, n).map(x => (typeof x === "string" ? x : x.file));
+  return names.join(", ") + (arr.length > n ? ` 等 ${arr.length} 张` : "");
+}
+function showPair(j) {
+  const el = $("pair-meta");
+  if (!j) { el.textContent = ""; return; }
+  const lines = [`配对成功 ${j.matched} 张（带字 ${j.src_count} / 底图 ${j.clean_count}）`];
+  if (j.missing_clean?.length) lines.push("带字图有、底图没有（请改回同名）：" + fmtList(j.missing_clean, 12));
+  if (j.size_mismatch?.length) {
+    const bits = j.size_mismatch.slice(0, 8).map(x => {
+      const a = x.src ? x.src.join("×") : "?";
+      const b = x.clean ? x.clean.join("×") : "?";
+      return `${x.file} ${a} vs ${b}`;
+    });
+    lines.push("同名但像素尺寸不同（裁剪后两边都要一致）：" + bits.join("；") + (j.size_mismatch.length > 8 ? " …" : ""));
+  }
+  if (j.extra_clean?.length) lines.push("底图多出来、不会处理：" + fmtList(j.extra_clean, 12));
+  if (j.blocking) lines.push("对不上的先手动改文件夹，对上后再点开始。");
+  el.textContent = lines.join("\n");
+  el.style.color = j.blocking ? "var(--accent)" : "var(--muted)";
+  el.style.whiteSpace = "pre-wrap";
+}
+async function checkPairs() {
+  if ($("mode").value !== "b") { $("pair-meta").textContent = ""; return; }
+  const src = $("src").value.trim(), clean = $("clean").value.trim();
+  if (!src || !clean) { $("pair-meta").textContent = ""; return; }
+  const r = await fetch("/api/pairs", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({src, clean})
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok && !j.missing_clean) { $("pair-meta").textContent = j.detail || "配对检查失败"; return; }
+  showPair(j);
+}
 async function checkFolder(id, metaId) {
   const path = $(id).value.trim();
   if (!path) { $(metaId).textContent = ""; return; }
@@ -231,6 +268,7 @@ async function checkFolder(id, metaId) {
   $(metaId).textContent = `找到 ${j.count} 张图` + (j.sample?.length ? " · " + j.sample.slice(0,4).join(", ") : "");
   if (j.path) $(id).value = j.path;
   toggleMode();
+  await checkPairs();
 }
 
 async function refreshJob() {
@@ -282,8 +320,17 @@ $("btn-run").onclick = async () => {
   const r = await fetch("/api/run", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload())});
   const j = await r.json().catch(() => ({}));
   $("btn-run").disabled = false;
-  const err = typeof j.detail === "string" ? j.detail : (j.detail ? JSON.stringify(j.detail) : "无法开始");
-  if (!r.ok) { setStatus($("run-status"), false, err); return; }
+  if (!r.ok) {
+    const d = j.detail;
+    if (d && typeof d === "object" && (d.missing_clean || d.size_mismatch)) {
+      showPair(d);
+      setStatus($("run-status"), false, d.message || "带字图和底图对不上，请先改文件夹。");
+      return;
+    }
+    const err = typeof d === "string" ? d : (d ? JSON.stringify(d) : "无法开始");
+    setStatus($("run-status"), false, err);
+    return;
+  }
   setStatus($("run-status"), true, "已开始");
   $("log").textContent = "";
   poll();

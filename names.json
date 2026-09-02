@@ -75,7 +75,8 @@
     {"zh": ["夜兰"], "en": "Yelan", "ja": "夜蘭", "game": "genshin"},
     {"zh": ["纳西妲"], "en": "Nahida", "ja": "ナヒーダ", "game": "genshin"},
     {"zh": ["芙宁娜"], "en": "Furina", "ja": "フリーナ", "game": "genshin"},
-    {"zh": ["那维莱特"], "en": "Neuvillette", "ja": "ヌヴィレット", "game": "genshin"}
+    {"zh": ["那维莱特"], "en": "Neuvillette", "ja": "ヌヴィレット", "game": "genshin"},
+    {"zh": ["奥黛塔小姐", "奥黛塔"], "en": "Odette", "ja": "オデット"}
   ],
   "sfx": [
     {"zh": "嗯?", "en": "Huh?", "ja": "ん？"},

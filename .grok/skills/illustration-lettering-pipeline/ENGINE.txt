@@ -1,0 +1,4 @@
+This skill uses the repo-root letter_b.py when it lives in this checkout.
+If you copy only this folder to ~/.grok/skills, also copy letter.py, letter_b.py,
+vision_locate.py, user_config.py, names.json, and requirements-b.txt into engine/
+or set LETTER_ENGINE to the clone root.

@@ -165,6 +165,54 @@ def _count_images(folder: Path) -> list[str]:
     return names
 
 
+def _image_size(path: Path) -> tuple[int, int] | None:
+    try:
+        from PIL import Image
+
+        with Image.open(path) as im:
+            return im.size
+    except Exception:
+        return None
+
+
+def pair_report(src: Path, clean: Path) -> dict:
+    """Mode B pairing: same filename, same pixel size. Do not start if names/sizes disagree."""
+    src_names = _count_images(src)
+    clean_names = _count_images(clean)
+    ss, cs = set(src_names), set(clean_names)
+    missing_clean = sorted(ss - cs)
+    extra_clean = sorted(cs - ss)
+    matched = sorted(ss & cs)
+    size_mismatch = []
+    for name in matched:
+        a = _image_size(src / name)
+        b = _image_size(clean / name)
+        if a is None or b is None or a != b:
+            size_mismatch.append(
+                {
+                    "file": name,
+                    "src": list(a) if a else None,
+                    "clean": list(b) if b else None,
+                }
+            )
+    blocking = bool(missing_clean or size_mismatch or not matched)
+    return {
+        "ok": not blocking,
+        "src_count": len(src_names),
+        "clean_count": len(clean_names),
+        "matched": len(matched) - len(size_mismatch),
+        "missing_clean": missing_clean,
+        "extra_clean": extra_clean,
+        "size_mismatch": size_mismatch,
+        "blocking": blocking,
+    }
+
+
+class PairIn(BaseModel):
+    src: str
+    clean: str
+
+
 def _append(line: str) -> None:
     with _lock:
         _job["log"].append(line.rstrip("\n"))
@@ -211,6 +259,15 @@ def post_settings(body: SettingsIn):
 @app.post("/api/test")
 def post_test(body: TestIn):
     return test_connection(body.base_url, body.api_key, body.model)
+
+
+@app.post("/api/pairs")
+def inspect_pairs(body: PairIn):
+    src = Path(body.src).expanduser()
+    clean = Path(body.clean).expanduser()
+    if not src.is_dir() or not clean.is_dir():
+        raise HTTPException(400, "源目录或底图目录不存在")
+    return pair_report(src, clean)
 
 
 @app.post("/api/folder")
@@ -296,6 +353,15 @@ def start_job(body: RunIn):
         clean = Path(data["clean"]).expanduser() if data["clean"] else None
         if not clean or not clean.is_dir():
             raise HTTPException(400, "Mode B 需要无字底图目录")
+        report = pair_report(src, clean)
+        if report["blocking"]:
+            raise HTTPException(
+                400,
+                {
+                    "message": "带字图和无字底图对不上。请按下面名单改文件名或重新导出同尺寸底图后再跑。多出来的底图不会使用。",
+                    **report,
+                },
+            )
     else:
         probe = probe_mode_a(data.get("mit_root") or "")
         if not probe["mode_a_ok"]:

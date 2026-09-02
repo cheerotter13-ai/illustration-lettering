@@ -213,6 +213,8 @@ _google_overload = 0
 
 
 def _user_compat() -> tuple[str, str, str]:
+    if (os.environ.get("LETTER_FORCE_CLOUD") or "").strip().lower() in ("gemini", "zenmux", "google"):
+        return "", "", ""
     try:
         from user_config import apply_to_env, user_endpoint
 

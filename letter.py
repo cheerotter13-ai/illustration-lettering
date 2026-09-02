@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import filecmp
 import json
 from difflib import SequenceMatcher
 import os
@@ -41,6 +42,9 @@ try:
     _apply_cfg()
 except Exception:
     pass
+if (os.environ.get("LETTER_FORCE_CLOUD") or "").strip().lower() in ("gemini", "zenmux", "google"):
+    for _k in ("LETTER_OPENAI_BASE", "LETTER_OPENAI_KEY", "LETTER_OPENAI_MODEL"):
+        os.environ.pop(_k, None)
 SRC = Path(os.environ.get("LETTER_SRC", str(HERE / "input")))
 LOG_DIR = Path(os.environ.get("LETTER_LOG_DIR", str(HERE / "logs")))
 NAMES_PATH = Path(os.environ.get("LETTER_NAMES", str(HERE / "names.json")))
@@ -2160,11 +2164,34 @@ async def main() -> None:
     global PREFILTER
     if MODE_B_ONLY:
         missing = [Path(j["src"]).name for j in jobs if not j.get("clean")]
-        if missing:
-            raise SystemExit(
-                "mode-b requires a same-name clean plate for every file; missing: "
-                + ", ".join(missing[:20])
-            )
+        size_bad = []
+        for j in jobs:
+            if not j.get("clean"):
+                continue
+            with Image.open(j["src"]) as im_s, Image.open(j["clean"]) as im_c:
+                if im_s.size != im_c.size:
+                    size_bad.append(
+                        f"{Path(j['src']).name} lettered={im_s.size[0]}x{im_s.size[1]} "
+                        f"clean={im_c.size[0]}x{im_c.size[1]}"
+                    )
+        extras = []
+        if CLEAN and CLEAN.is_dir():
+            src_names = {Path(j["src"]).name for j in jobs}
+            extras = [
+                p.name
+                for ext in ("*.jpg", "*.jpeg", "*.png", "*.webp")
+                for p in CLEAN.glob(ext)
+                if p.name not in src_names
+            ]
+        if extras:
+            print("mode-b extra clean plates (ignored): " + ", ".join(extras[:40]), flush=True)
+        if missing or size_bad:
+            bits = []
+            if missing:
+                bits.append("missing clean (rename/copy to the same filename): " + ", ".join(missing))
+            if size_bad:
+                bits.append("size mismatch (crop/export both sides to the same pixels): " + "; ".join(size_bad))
+            raise SystemExit("mode-b pairing failed; fix folders then retry. " + " | ".join(bits))
         PREFILTER = False
     need_lama = (not MODE_B_ONLY) and any(not j.get("clean") for j in jobs)
     need_det = bool(PREFILTER) and not MODE_B_ONLY
@@ -2287,6 +2314,17 @@ async def main() -> None:
                 print(f"{i}/{len(jobs)} passthrough_no_text {cache_key}", flush=True)
                 log_row(log_path, row)
                 continue
+            if (os.environ.get("LETTER_SKIP_DONE") or "").strip() == "1" and dst.exists():
+                try:
+                    if not filecmp.cmp(src, dst, shallow=False):
+                        stats["skipped_existing"] += 1
+                        row["status"] = "skipped_existing"
+                        row["total_s"] = 0
+                        print(f"{i}/{len(jobs)} skipped_existing {cache_key}", flush=True)
+                        log_row(log_path, row)
+                        continue
+                except Exception:
+                    pass
             bgr = load_bgr(src)
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             h, w = rgb.shape[:2]

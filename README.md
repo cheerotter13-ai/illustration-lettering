@@ -1,4 +1,4 @@
-# illustration-lettering v0.10
+# illustration-lettering v0.11
 
 插画 / 漫画 **中文配文 → 英文（或日文）嵌字**。克隆仓库后双击启动脚本，浏览器会打开本机网页；填上你的模型接口，选文件夹即可批量出图。
 
@@ -33,10 +33,26 @@ python web_app.py
 
 1. **Base URL / API Key / 模型名**：任意 OpenAI 兼容接口（官方、中转、或本机 Ollama `http://127.0.0.1:11434/v1`）。定位和翻译都走这一套。本地模型必须带**视觉**才能找框。
 2. 把资源管理器 / Finder 里的文件夹路径粘进页面（浏览器不能直接弹出系统选文件夹窗口）。失焦后会显示里面有多少张图。
-3. Mode B 还要无字底图目录（文件名与带字图相同）。
+3. Mode B 还要无字底图目录。**必须与带字图文件名相同、像素宽高相同。** 你后来裁剪、改名、增删了其中一侧，页面会列出对不上的文件并拒绝开跑，请先手动改文件夹再点开始。底图多出来的文件会提示、不会处理。
 4. 密钥只存在本机用户目录：`%APPDATA%\illustration-lettering\config.json`（Mac：`~/Library/Application Support/illustration-lettering/`），不进 git。
 
 命令行仍可用 `letter.py` / `letter_b.py`。以前的 PyInstaller exe 已不再维护。
+
+### Grok Build / Antigravity 批量 skill
+
+把本仓库当作 Grok Build 或 Antigravity 工作区打开。Agent 会加载：
+
+- `.grok/skills/illustration-lettering-pipeline`（Grok Build）
+- `.agents/skills/illustration-lettering-pipeline`（Antigravity）
+
+斜杠：`/illustration-lettering-pipeline`。第一次：
+
+```bat
+python -m pip install -r requirements-b.txt
+python .grok/skills/illustration-lettering-pipeline/scripts/setup_config.py --base-url URL --api-key KEY --model MODEL --test
+```
+
+然后把「有字文件夹、无字底图、英/日输出目录」发给 agent。会先分类图一拟声 / 图二叠字，再 Mode B 嵌字；双页会拆开。密钥不进 git。也可把该 skill 目录拷到 `~/.grok/skills/` 或 `~/.gemini/config/skills/`。
 
 ## Mode A 前置条件（缺一不可）
 

@@ -9,6 +9,8 @@ description: >
 
 # illustration-lettering Mode B (portable)
 
+For a full series (classify 图一 SFX vs 图二 overlay, recover unpaired names, split double-pages): use **illustration-lettering-pipeline**.
+
 Use **only Mode B**. Do not load manga-image-translator, ComicTextDetector, or CUDA.
 
 Repo (this skill lives with the code): the `illustration-lettering` checkout that contains `letter.py`, `letter_b.py`, and `vision_locate.py`.
